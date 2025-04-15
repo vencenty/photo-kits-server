@@ -61,6 +61,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		return resp, nil
 	}
 
+	// 写入bucket
 	_, err = minioClient.PutObject(
 		l.svcCtx.Config.Minio.Bucket,
 		fileSha1Sum,
@@ -73,6 +74,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		return resp, nil
 	}
 
+	// 返回相应
 	return &types.UploadResponse{
 		Filename: handler.Filename,
 		Size:     handler.Size,

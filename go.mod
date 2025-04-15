@@ -7,6 +7,7 @@ toolchain go1.23.4
 require (
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/zeromicro/go-zero v1.8.2
+	github.com/zeromicro/x v0.0.0-20240408115609-8224c482b07e
 )
 
 require (
