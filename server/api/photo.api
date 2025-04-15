@@ -5,7 +5,12 @@ type DownloadRequest {
 }
 
 type UploadResponse {
-	Message string `json:"message"`
+	// 文件名
+	Filename string `json:"filename"`
+	// 文件大小
+	Size int64 `json:"size"`
+	// 文件完整路径
+	URL string `json:"url"`
 }
 
 service photo-api {

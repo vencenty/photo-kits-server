@@ -6,8 +6,18 @@ type Config struct {
 	rest.RestConf
 	Path     string   `json:"path"`
 	Database Database `json:"database"`
+	Minio    Minio    `json:"minio"`
 }
 
 type Database struct {
 	DataSource string `json:"dataSource"`
+}
+
+type Minio struct {
+	Endpoint    string `json:"endpoint"`
+	AccessKey   string `json:"accessKey"`
+	SecretKey   string `json:"secretKey"`
+	UseSSL      bool   `json:"useSSL"`
+	Bucket      string `json:"bucket"`
+	ThumbBucket string `json:"thumbBucket"`
 }
