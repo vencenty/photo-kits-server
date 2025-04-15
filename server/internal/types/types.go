@@ -10,5 +10,6 @@ type DownloadRequest struct {
 type UploadResponse struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
+	Sha1     string `json:"sha1"`
 	URL      string `json:"url"`
 }

@@ -1,21 +1,22 @@
 syntax = "v1"
 
 type DownloadRequest {
-	File string `json:"file"`
+    File string `json:"file"`
 }
 
 type UploadResponse {
-	// 文件名
-	Filename string `json:"filename"`
-	// 文件大小
-	Size int64 `json:"size"`
-	// 文件完整路径
-	URL string `json:"url"`
+    // 文件名
+    Filename string `json:"filename"`
+    // 文件大小
+    Size int64 `json:"size"`
+    // 文件sha1
+    Sha1 string `json:"sha1"`
+    // 文件完整路径
+    URL string `json:"url"`
 }
 
 service photo-api {
-	@handler Upload
-	post /api/upload/photo returns (UploadResponse)
-
+    @handler Upload
+    post /api/upload/photo returns (UploadResponse)
 }
 

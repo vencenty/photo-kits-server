@@ -9,9 +9,9 @@ Database:
   Datasource: "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits?charset=utf8&parseTime=true"
 
 Minio:
+  Schema: "https"
   Endpoint: "storage.vencenty.cc"
-  AccessKey: "86WZoqH05QQbAUhPdSYK"
-  SecretKey: "6Nvqz1CR3RIWoMEvBIx2eic0DW4C8pfiYsYwdtLH"
-  UseSSL: false
+  AccessKey: "Hltp3Um0RQoRgZ9IpJD6"
+  SecretKey: "LT3iAOoPSYf81C7ltL6Et19AzULgYYyOXeoZc0lU"
+  UseSSL: true
   Bucket: "user-photos"
-  ThumbBucket: "img-thumbs"

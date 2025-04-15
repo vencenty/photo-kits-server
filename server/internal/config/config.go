@@ -14,10 +14,10 @@ type Database struct {
 }
 
 type Minio struct {
-	Endpoint    string `json:"endpoint"`
-	AccessKey   string `json:"accessKey"`
-	SecretKey   string `json:"secretKey"`
-	UseSSL      bool   `json:"useSSL"`
-	Bucket      string `json:"bucket"`
-	ThumbBucket string `json:"thumbBucket"`
+	Schema    string `json:"schema"`
+	Endpoint  string `json:"endpoint"`
+	AccessKey string `json:"accessKey"`
+	SecretKey string `json:"secretKey"`
+	UseSSL    bool   `json:"useSSL"`
+	Bucket    string `json:"bucket"`
 }

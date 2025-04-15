@@ -58,6 +58,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	)
 	if err != nil {
 		logx.Errorf("minioClientInitError:%v", err)
+		return resp, nil
 	}
 
 	_, err = minioClient.PutObject(
@@ -75,7 +76,8 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	return &types.UploadResponse{
 		Filename: handler.Filename,
 		Size:     handler.Size,
-		URL:      fmt.Sprintf("https://%s/%s/%s", l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, fileSha1Sum),
+		Sha1:     fileSha1Sum,
+		URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.Minio.Schema, l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, fileSha1Sum),
 	}, nil
 
 }
