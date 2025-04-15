@@ -3,12 +3,13 @@ package logic
 import (
 	"context"
 	"fmt"
-	"io"
+	"github.com/zeromicro/go-zero/core/jsonx"
 	"net/http"
 	"os"
 	"path"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
+	"photo-kits-server/server/model"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -43,10 +44,15 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		return nil, err
 	}
 	defer tempFile.Close()
-	io.Copy(tempFile, file)
+	//io.Copy(tempFile, file)
+
+	orderModel := model.NewOrdersModel(l.svcCtx.DB)
+	sn, err := orderModel.FindOneByOrderSn(l.ctx, "42")
+	fmt.Println(sn, err)
+	r, err := jsonx.Marshal(sn)
 
 	return &types.UploadResponse{
-		Message: "",
+		Message: string(r),
 	}, nil
 
 }
