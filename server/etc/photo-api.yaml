@@ -4,4 +4,14 @@ Port: 8888
 Timeout: 100000
 MaxBytes: 1073741824
 path: '.'
-datasource: "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits?charset=utf8&parseTime=true"
+
+DB:
+  datasource: "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits?charset=utf8&parseTime=true"
+
+Minio:
+  endpoint: "fn.vencenty.cn:29000"
+  access_key: "aalNu8yRU2vcGwgFQ0wk"
+  secret_key: "V4UQ7uWJdKQsJTwcpVht1aAK7PZK0yvDgdggdzAl"
+  use_ssl: false
+  bucket: "user-photos"
+  thumb_bucket: "img-thumbs"

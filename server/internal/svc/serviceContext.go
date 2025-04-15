@@ -13,7 +13,7 @@ type ServiceContext struct {
 func NewServiceContext(c config.Config) *ServiceContext {
 	return &ServiceContext{
 		Config: c,
-		DB:     sqlx.NewMysql(c.DataSource),
+		DB:     sqlx.NewMysql(c.Database.DataSource),
 	}
 
 }
