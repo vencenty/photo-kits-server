@@ -35,7 +35,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	//result int64
 	)
 
-	file, handler, err := l.r.FormFile("file")
+	file, handler, err := l.r.FormFile("file1")
 
 	if err != nil {
 		logx.Errorf("GetFileError:%v", err)
