@@ -16,12 +16,7 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 		[]rest.Route{
 			{
 				Method:  http.MethodPost,
-				Path:    "/api/download/:file",
-				Handler: DownloadHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/upload/file",
+				Path:    "/api/upload/photo",
 				Handler: UploadHandler(serverCtx),
 			},
 		},

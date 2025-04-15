@@ -8,11 +8,9 @@ type UploadResponse {
 	Message string `json:"message"`
 }
 
-service file-api {
+service photo-api {
 	@handler Upload
-	post /api/upload/file returns (UploadResponse)
+	post /api/upload/photo returns (UploadResponse)
 
-	@handler Download
-	post /api/download/:file (DownloadRequest)
 }
 
