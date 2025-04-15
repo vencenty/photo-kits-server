@@ -1,0 +1,18 @@
+syntax = "v1"
+
+type DownloadRequest {
+	File string `json:"file"`
+}
+
+type UploadResponse {
+	Message string `json:"message"`
+}
+
+service file-api {
+	@handler Upload
+	post /api/upload/file returns (UploadResponse)
+
+	@handler Download
+	post /api/download/:file (DownloadRequest)
+}
+
