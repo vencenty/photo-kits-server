@@ -1,3 +1,6 @@
 syntax = "v1"
 
 import "./photo.api"
+
+
+// root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits

@@ -45,6 +45,8 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	defer tempFile.Close()
 	io.Copy(tempFile, file)
 
-	return &types.UploadResponse{}, nil
+	return &types.UploadResponse{
+		Message: "",
+	}, nil
 
 }
