@@ -7,6 +7,19 @@ type DownloadRequest struct {
 	File string `json:"file"`
 }
 
+type Photo struct {
+	Size int64    `json:"size"`
+	Unit string   `json:"unit"`
+	Urls []string `json:"urls"`
+}
+
+type SubmitRequest struct {
+	OrderSn  string  `json:"filename"`
+	Receiver int64   `json:"receiver"`
+	Remark   string  `json:"remark"`
+	Photos   []Photo `json:"photo"`
+}
+
 type UploadResponse struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"photo-kits-server/server/middleware"
 
 	"photo-kits-server/server/internal/config"
 	"photo-kits-server/server/internal/handler"
@@ -21,6 +22,9 @@ func main() {
 	conf.MustLoad(*configFile, &c)
 
 	server := rest.MustNewServer(c.RestConf)
+	// 配置跨域请求
+	server.Use(middleware.CorsMiddleware)
+
 	defer server.Stop()
 
 	ctx := svc.NewServiceContext(c)
