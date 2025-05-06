@@ -1,47 +1,48 @@
 syntax = "v1"
 
-type DownloadRequest {
-	File string `json:"file"`
-}
+
 
 type UploadResponse {
-	// 文件名
-	Filename string `json:"filename"`
-	// 文件大小
-	Size int64 `json:"size"`
-	// 文件sha1
-	Sha1 string `json:"sha1"`
-	// 文件完整路径
-	URL string `json:"url"`
+    // 文件名
+    Filename string `json:"filename"`
+    // 文件大小
+    Size int64 `json:"size"`
+    // 文件sha1
+    Sha1 string `json:"sha1"`
+    // 文件完整路径
+    URL string `json:"url"`
 }
 
 type Photo {
-	// 尺寸
-	Size int64 `json:"size"`
-	// 照片尺寸单位，寸还是啥
-	Unit string `json:"unit"`
-	// 照片链接
-	Urls []string `json:"urls"`
+    // 尺寸
+    Size int64 `json:"size"`
+    // 照片尺寸单位，寸还是啥
+    Unit string `json:"unit"`
+    // 照片链接
+    Urls []string `json:"urls"`
 }
 
 type SubmitRequest {
-	// 订单号
-	OrderSn string `json:"filename"`
-	// 收件人
-	Receiver int64 `json:"receiver"`
-	// 备注信息
-	Remark string `json:"remark"`
-	// 照片列表
-	Photos []Photo `json:"photo"`
+    // 订单号
+    OrderSn string `json:"filename"`
+    // 收件人
+    Receiver int64 `json:"receiver"`
+    // 备注信息
+    Remark string `json:"remark"`
+    // 照片列表
+    Photos []Photo `json:"photo"`
 }
+
+@server(
+    group: photo
+)
 
 service photo-api {
- 	// 上传照片接口
-	@handler Upload
-	post /api/photo/upload returns (UploadResponse)
+    // 上传照片接口
+    @handler Upload
+    post /api/photo/upload returns (UploadResponse)
 
-	// 提交
-	@handler Submit
-	post /api/photo/submit (SubmitRequest)
+    // 提交
+    @handler Submit
+    post /api/photo/submit (SubmitRequest)
 }
-

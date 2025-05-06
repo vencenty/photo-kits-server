@@ -3,10 +3,6 @@
 
 package types
 
-type DownloadRequest struct {
-	File string `json:"file"`
-}
-
 type Photo struct {
 	Size int64    `json:"size"`
 	Unit string   `json:"unit"`

@@ -6,6 +6,7 @@ package handler
 import (
 	"net/http"
 
+	photo "photo-kits-server/server/internal/handler/photo"
 	"photo-kits-server/server/internal/svc"
 
 	"github.com/zeromicro/go-zero/rest"
@@ -17,12 +18,12 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/photo/submit",
-				Handler: SubmitHandler(serverCtx),
+				Handler: photo.SubmitHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/photo/upload",
-				Handler: UploadHandler(serverCtx),
+				Handler: photo.UploadHandler(serverCtx),
 			},
 		},
 	)

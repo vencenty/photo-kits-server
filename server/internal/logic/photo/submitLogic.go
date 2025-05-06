@@ -1,4 +1,4 @@
-package logic
+package photo
 
 import (
 	"context"
