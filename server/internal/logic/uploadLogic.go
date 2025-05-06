@@ -15,33 +15,30 @@ import (
 
 type UploadLogic struct {
 	logx.Logger
-	ctx    context.Context
-	svcCtx *svc.ServiceContext
-	r      *http.Request
+	ctx            context.Context
+	svcCtx         *svc.ServiceContext
+	request        *http.Request
+	responseWriter http.ResponseWriter
 }
 
-func NewUploadLogic(ctx context.Context, svcCtx *svc.ServiceContext, r *http.Request) *UploadLogic {
+func NewUploadLogic(ctx context.Context, svcCtx *svc.ServiceContext, r *http.Request, w http.ResponseWriter) *UploadLogic {
 	return &UploadLogic{
-		Logger: logx.WithContext(ctx),
-		ctx:    ctx,
-		svcCtx: svcCtx,
-		r:      r,
+		Logger:         logx.WithContext(ctx),
+		ctx:            ctx,
+		svcCtx:         svcCtx,
+		request:        r,
+		responseWriter: w,
 	}
 }
 
 func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 
-	var (
-	//result int64
-	)
-
-	file, handler, err := l.r.FormFile("file1")
+	file, handler, err := l.request.FormFile("file")
 
 	if err != nil {
 		logx.Errorf("GetFileError:%v", err)
-		return nil, nil
+		return resp, err
 	}
-
 	// 创建 SHA1 哈希对象
 	hasher := sha1.New()
 
@@ -58,7 +55,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	)
 	if err != nil {
 		logx.Errorf("minioClientInitError:%v", err)
-		return resp, nil
+		return resp, err
 	}
 
 	// 写入bucket
@@ -71,7 +68,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	)
 	if err != nil {
 		logx.Errorf("minioClientPutObjectError:%v", err)
-		return resp, nil
+		return resp, err
 	}
 
 	// 返回相应

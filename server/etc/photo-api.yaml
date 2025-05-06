@@ -10,7 +10,7 @@ Database:
 Minio:
   Schema: "https"
   Endpoint: "storage.vencenty.cc"
-  AccessKey: "Hltp3Um0RQoRgZ9IpJD6"
-  SecretKey: "LT3iAOoPSYf81C7ltL6Et19AzULgYYyOXeoZc0lU"
+  AccessKey: "8glMRYHKdp4uWE5SfOUq"
+  SecretKey: "VzIwRXMEk7A4ZjWUKiNvXW1xAEB6DmfsK20bv98e"
   UseSSL: true
   Bucket: "user-photos"
