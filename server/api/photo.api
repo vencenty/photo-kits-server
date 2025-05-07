@@ -1,7 +1,6 @@
 syntax = "v1"
 
 
-
 type UploadResponse {
     // 文件名
     Filename string `json:"filename"`
@@ -24,16 +23,22 @@ type Photo {
 
 type SubmitRequest {
     // 订单号
-    OrderSn string `json:"filename"`
+    OrderSn string `json:"order_sn"`
     // 收件人
-    Receiver int64 `json:"receiver"`
+    Receiver string `json:"receiver"`
     // 备注信息
     Remark string `json:"remark"`
     // 照片列表
-    Photos []Photo `json:"photo"`
+    Photos []Photo `json:"photos"`
 }
 
-@server(
+// 上传响应值
+type SubmitResponse {
+    // 总上传数量
+    Total int64 `json:"total"`
+}
+
+@server (
     group: photo
 )
 
@@ -44,5 +49,6 @@ service photo-api {
 
     // 提交
     @handler Submit
-    post /api/photo/submit (SubmitRequest)
+    post /api/photo/submit (SubmitRequest) returns (SubmitResponse)
 }
+

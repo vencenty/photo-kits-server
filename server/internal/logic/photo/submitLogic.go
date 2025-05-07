@@ -2,6 +2,7 @@ package photo
 
 import (
 	"context"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
 
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
@@ -13,18 +14,20 @@ type SubmitLogic struct {
 	logx.Logger
 	ctx    context.Context
 	svcCtx *svc.ServiceContext
+	db     sqlx.SqlConn
 }
 
 func NewSubmitLogic(ctx context.Context, svcCtx *svc.ServiceContext) *SubmitLogic {
+	db := sqlx.NewSqlConn("mysql", svcCtx.Config.Database.DataSource)
 	return &SubmitLogic{
 		Logger: logx.WithContext(ctx),
 		ctx:    ctx,
 		svcCtx: svcCtx,
+		db:     db,
 	}
 }
 
 func (l *SubmitLogic) Submit(req *types.SubmitRequest) error {
-	// todo: add your logic here and delete this line
 
 	return nil
 }

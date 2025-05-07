@@ -10,10 +10,14 @@ type Photo struct {
 }
 
 type SubmitRequest struct {
-	OrderSn  string  `json:"filename"`
-	Receiver int64   `json:"receiver"`
+	OrderSn  string  `json:"order_sn"`
+	Receiver string  `json:"receiver"`
 	Remark   string  `json:"remark"`
-	Photos   []Photo `json:"photo"`
+	Photos   []Photo `json:"photos"`
+}
+
+type SubmitResponse struct {
+	Total int64 `json:"total"`
 }
 
 type UploadResponse struct {
