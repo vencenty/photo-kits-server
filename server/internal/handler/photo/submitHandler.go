@@ -1,10 +1,11 @@
 package photo
 
 import (
+	xhttp "github.com/zeromicro/x/http"
 	"net/http"
-	"photo-kits-server/server/internal/logic/photo"
 
 	"github.com/zeromicro/go-zero/rest/httpx"
+	"photo-kits-server/server/internal/logic/photo"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
 )
@@ -18,11 +19,11 @@ func SubmitHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 		}
 
 		l := photo.NewSubmitLogic(r.Context(), svcCtx)
-		err := l.Submit(&req)
+		resp, err := l.Submit(&req)
 		if err != nil {
-			httpx.ErrorCtx(r.Context(), w, err)
+			xhttp.JsonBaseResponseCtx(r.Context(), w, err)
 		} else {
-			httpx.Ok(w)
+			xhttp.JsonBaseResponseCtx(r.Context(), w, resp)
 		}
 	}
 }

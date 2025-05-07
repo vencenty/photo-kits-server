@@ -4,6 +4,13 @@ import "github.com/zeromicro/go-zero/core/stores/sqlx"
 
 var _ OrderModel = (*customOrderModel)(nil)
 
+const (
+	// 订单待处理
+	OrderStatusPending = 0
+	// 订单已经锁定
+	OrderStatusProcessing = 1
+)
+
 type (
 	// OrderModel is an interface to be customized, add more methods here,
 	// and implement the added methods in customOrderModel.
