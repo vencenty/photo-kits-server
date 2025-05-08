@@ -38,13 +38,13 @@ type (
 	}
 
 	Order struct {
-		Id        uint64         `db:"id"`
-		OrderSn   string         `db:"order_sn"`
-		Receiver  string         `db:"receiver"`
-		Remark    sql.NullString `db:"remark"`
-		Status    int64          `db:"status"`
-		CreatedAt time.Time      `db:"created_at"`
-		UpdatedAt time.Time      `db:"updated_at"`
+		Id        uint64    `db:"id"`
+		OrderSn   string    `db:"order_sn"`
+		Receiver  string    `db:"receiver"`
+		Remark    string    `db:"remark"`
+		Status    int64     `db:"status"`
+		CreatedAt time.Time `db:"created_at"`
+		UpdatedAt time.Time `db:"updated_at"`
 	}
 )
 
