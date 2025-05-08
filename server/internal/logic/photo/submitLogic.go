@@ -72,7 +72,6 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	} else {
 		order.Receiver = req.Receiver
 		order.Remark = req.Remark
-		order.Status = model.OrderStatusPending
 		order.UpdatedAt = time.Now()
 
 		if err = l.orderModel.Update(l.ctx, order); err != nil {
@@ -119,5 +118,4 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 
 	// 如果订单已经存在，那么删除订单下所有关联的photo
 	return resp, nil
-
 }
