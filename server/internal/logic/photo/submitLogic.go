@@ -3,6 +3,8 @@ package photo
 import (
 	"context"
 	"database/sql"
+	stdErrors "errors"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"github.com/zeromicro/x/errors"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
@@ -40,7 +42,7 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	)
 
 	order, err = l.orderModel.FindOneByOrderSn(l.ctx, req.OrderSn)
-	if err != nil {
+	if err != nil && !stdErrors.Is(err, sqlx.ErrNotFound) {
 		return resp, err
 	}
 
@@ -49,19 +51,16 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		return resp, errors.New(-1, "订单已经进入处理流程，无法重新上传图片，如有疑问请联系田田洗照片处理")
 	}
 
-	//// 组装订单数据
-	//order = &model.Order{
-	//	OrderSn:  req.OrderSn,
-	//	Receiver: req.Receiver,
-	//	Remark:   req.Remark,
-	//	Status:   model.OrderStatusPending,
-	//}
-
 	// 没有订单的话创建订单
 	if order == nil {
-		order.CreatedAt = time.Now()
-		order.UpdatedAt = time.Now()
-
+		order = &model.Order{
+			OrderSn:   req.OrderSn,
+			Receiver:  req.Receiver,
+			Remark:    req.Remark,
+			Status:    model.OrderStatusPending,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
 		if result, err = l.orderModel.Insert(l.ctx, order); err != nil {
 			return nil, err
 		}
@@ -71,8 +70,11 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		order.Id = uint64(orderId)
 
 	} else {
-		// 有订单的话修改订单信息
+		order.Receiver = req.Receiver
+		order.Remark = req.Remark
+		order.Status = model.OrderStatusPending
 		order.UpdatedAt = time.Now()
+
 		if err = l.orderModel.Update(l.ctx, order); err != nil {
 			return nil, err
 		}
