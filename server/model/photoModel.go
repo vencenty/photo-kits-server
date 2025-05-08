@@ -1,6 +1,10 @@
 package model
 
-import "github.com/zeromicro/go-zero/core/stores/sqlx"
+import (
+	"context"
+	"fmt"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
+)
 
 var _ PhotoModel = (*customPhotoModel)(nil)
 
@@ -10,6 +14,7 @@ type (
 	PhotoModel interface {
 		photoModel
 		withSession(session sqlx.Session) PhotoModel
+		DeleteByOrderId(ctx context.Context, orderId uint64) error
 	}
 
 	customPhotoModel struct {
@@ -26,4 +31,10 @@ func NewPhotoModel(conn sqlx.SqlConn) PhotoModel {
 
 func (m *customPhotoModel) withSession(session sqlx.Session) PhotoModel {
 	return NewPhotoModel(sqlx.NewSqlConnFromSession(session))
+}
+
+func (m *customPhotoModel) DeleteByOrderId(ctx context.Context, orderId uint64) error {
+	query := fmt.Sprintf("delete from %s where `order_id` = ?", m.table)
+	_, err := m.conn.ExecCtx(ctx, query, orderId)
+	return err
 }

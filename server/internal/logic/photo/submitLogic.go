@@ -2,6 +2,7 @@ package photo
 
 import (
 	"context"
+	"database/sql"
 	"github.com/zeromicro/x/errors"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
@@ -32,7 +33,10 @@ func NewSubmitLogic(ctx context.Context, svcCtx *svc.ServiceContext) *SubmitLogi
 func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitResponse, err error) {
 
 	var (
-		order *model.Order
+		order       *model.Order
+		result      sql.Result
+		totalPhotos int64
+		orderId     int64
 	)
 
 	order, err = l.orderModel.FindOneByOrderSn(l.ctx, req.OrderSn)
@@ -45,95 +49,71 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		return resp, errors.New(-1, "订单已经进入处理流程，无法重新上传图片，如有疑问请联系田田洗照片处理")
 	}
 
-	// 没有订单的时候，创建订单，然后关联照片数据
+	//// 组装订单数据
+	//order = &model.Order{
+	//	OrderSn:  req.OrderSn,
+	//	Receiver: req.Receiver,
+	//	Remark:   req.Remark,
+	//	Status:   model.OrderStatusPending,
+	//}
+
+	// 没有订单的话创建订单
 	if order == nil {
-		order = &model.Order{
-			OrderSn:   req.OrderSn,
-			Receiver:  req.Receiver,
-			Remark:    req.Remark,
-			Status:    0, // 未处理状态
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+		order.CreatedAt = time.Now()
+		order.UpdatedAt = time.Now()
+
+		if result, err = l.orderModel.Insert(l.ctx, order); err != nil {
+			return nil, err
 		}
+		if orderId, err = result.LastInsertId(); err != nil {
+			return nil, err
+		}
+		order.Id = uint64(orderId)
+
 	} else {
-
-	}
-
-	// 检查订单是否存在，不存在则创建
-	order, err := s.photoRepo.GetOrderByOrderSN(req.OrderSn)
-	if err != nil {
-		// 创建新订单
-		order = &model.Order{
-			OrderSN:   req.OrderSn,
-			Receiver:  req.Receiver,
-			Remark:    req.Remark,
-			Status:    0, // 未处理状态
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		if err := s.photoRepo.CreateOrder(order); err != nil {
-			return nil, errors.New("创建订单失败: " + err.Error())
-		}
-	} else {
-		// 先删除该订单关联的所有照片
-		if err = s.photoRepo.DeletePhotosByOrderID(order.ID); err != nil {
-			return nil, errors.New("删除旧照片记录失败: " + err.Error())
+		// 有订单的话修改订单信息
+		order.UpdatedAt = time.Now()
+		if err = l.orderModel.Update(l.ctx, order); err != nil {
+			return nil, err
 		}
 
-		// 如果订单存在，更新收货人姓名和备注
-		if order.Receiver != req.Receiver || order.Remark != req.Remark {
-			order.Receiver = req.Receiver
-			order.Remark = req.Remark
-			order.UpdatedAt = time.Now()
-			if err := s.photoRepo.UpdateOrder(order); err != nil {
-				return nil, errors.New("更新订单失败: " + err.Error())
-			}
+		// 删除订单下关联的订单数据
+		if err = l.photoModel.DeleteByOrderId(l.ctx, order.Id); err != nil {
+			return nil, err
 		}
 	}
 
-	// 处理照片数据
-	var photos []*model.Photo
-	totalPhotos := 0
+	// 把照片数据关联给订单
 
+	photos := make([]*model.Photo, 0)
 	for _, photo := range req.Photos {
 		// 添加每个URL对应的照片记录
-		for _, url := range photo.URLs {
+		for _, url := range photo.Urls {
 			if url == "" {
 				continue
 			}
 
-			photoModel := &model.Photo{
-				OrderID:   order.ID,
-				URL:       url,
+			p := &model.Photo{
+				OrderId:   order.Id,
+				Url:       url,
 				Size:      photo.Size,
 				Unit:      photo.Unit,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}
-			photos = append(photos, photoModel)
+			photos = append(photos, p)
 			totalPhotos++
 		}
 	}
 
-	// 保存照片记录
-	if len(photos) > 0 {
-
-		if err = s.photoRepo.DeletePhotosByOrderID(order.ID); err != nil {
-			return nil, errors.New("删除旧照片记录失败: " + err.Error())
-		}
-		if err := s.photoRepo.CreatePhotos(photos); err != nil {
-			return nil, errors.New("保存照片记录失败: " + err.Error())
+	for _, photo := range photos {
+		if _, err = l.photoModel.Insert(l.ctx, photo); err != nil {
+			return nil, err
 		}
 	}
 
-	return &model.PhotoUploadResponse{
-		Success:     true,
-		TotalPhotos: totalPhotos,
-		Message:     "照片上传成功",
-	}, nil
-
 	resp = new(types.SubmitResponse)
-	resp.Total = 100
+	resp.Total = totalPhotos
 
 	// 如果订单已经存在，那么删除订单下所有关联的photo
 	return resp, nil
