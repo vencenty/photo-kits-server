@@ -47,8 +47,8 @@ service photo-api {
     @handler Upload
     post /api/photo/upload returns (UploadResponse)
 
-    // 提交
+    // 提交订单
     @handler Submit
-    post /api/photo/submit (SubmitRequest) returns (SubmitResponse)
+    post /api/order/submit (SubmitRequest) returns (SubmitResponse)
 }
 
