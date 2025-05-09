@@ -15,6 +15,7 @@ type (
 		photoModel
 		withSession(session sqlx.Session) PhotoModel
 		DeleteByOrderId(ctx context.Context, orderId uint64) error
+		FindByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error)
 	}
 
 	customPhotoModel struct {
@@ -37,4 +38,15 @@ func (m *customPhotoModel) DeleteByOrderId(ctx context.Context, orderId uint64) 
 	query := fmt.Sprintf("delete from %s where `order_id` = ?", m.table)
 	_, err := m.conn.ExecCtx(ctx, query, orderId)
 	return err
+}
+
+// FindByOrderId 查找订单的所有照片
+func (m *customPhotoModel) FindByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error) {
+	var photos []*Photo
+	query := fmt.Sprintf("select %s from %s where `order_id` = ?", photoRows, m.table)
+	err := m.conn.QueryRowsCtx(ctx, &photos, query, orderId)
+	if err != nil {
+		return nil, err
+	}
+	return photos, nil
 }

@@ -2,9 +2,12 @@ package sync
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -27,144 +30,198 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 		config:     syncConfig,
 		db:         db,
 		photoModel: model.NewPhotoModel(db),
-		orderModel: model.NewOrderModel(db), // 如果需要处理订单，添加orderModel
+		orderModel: model.NewOrderModel(db),
 	}
 }
 
-// SyncPhotos 执行照片同步操作
+// SyncPhotos 执行照片同步操作，扫描待处理订单并创建目录结构
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	logx.Info("开始同步照片...")
 
-	// 检查源目录是否存在
-	if _, err := os.Stat(s.config.SourcePath); os.IsNotExist(err) {
-		logx.Errorf("源目录不存在: %s", s.config.SourcePath)
+	// 检查输出目录是否存在，不存在则创建
+	if err := os.MkdirAll(s.config.OutputPath, 0755); err != nil {
+		logx.Errorf("无法创建输出目录: %v", err)
 		return err
 	}
 
-	// 创建备份目录（如果不存在）
-	if err := os.MkdirAll(s.config.BackupPath, 0755); err != nil {
-		logx.Errorf("无法创建备份目录: %v", err)
-		return err
-	}
-
-	// 扫描源目录中的照片文件
-	files, err := s.scanSourceDirectory()
+	// 获取待处理订单
+	batchSize := s.config.BatchSize
+	pendingOrders, err := s.orderModel.FindPendingOrders(ctx, batchSize)
 	if err != nil {
-		logx.Errorf("扫描源目录失败: %v", err)
+		logx.Errorf("查询待处理订单失败: %v", err)
 		return err
 	}
 
-	logx.Infof("找到 %d 个照片文件需要处理", len(files))
-
-	if len(files) == 0 {
-		logx.Info("没有找到需要处理的照片文件")
+	if len(pendingOrders) == 0 {
+		logx.Info("没有找到待处理的订单")
 		return nil
 	}
 
-	// 按批次处理文件，每批次处理s.config.BatchSize个文件
-	// 这里只是示例，实际业务逻辑需要根据具体需求调整
-	// 例如：可以根据文件名或目录结构识别照片所属的订单ID
-	//
-	// 示例：假设所有照片都属于同一个订单（orderId = 1）
-	// 实际应用中，您需要根据业务逻辑确定每个照片的orderId
+	logx.Infof("找到 %d 个待处理订单", len(pendingOrders))
 
-	var processedCount int
-	batchSize := s.config.BatchSize
-
-	// 模拟一个订单ID，实际应用中需要根据业务逻辑获取
-	// 例如：可以从文件名、目录名等提取订单ID
-	var sampleOrderId uint64 = 1
-
-	for i := 0; i < len(files); i += batchSize {
-		end := i + batchSize
-		if end > len(files) {
-			end = len(files)
+	// 处理每个订单
+	for _, order := range pendingOrders {
+		// 更新订单状态为处理中
+		if err := s.orderModel.UpdateStatus(ctx, order.Id, model.OrderStatusProcessing); err != nil {
+			logx.Errorf("更新订单状态失败, 订单ID: %d, 错误: %v", order.Id, err)
+			continue
 		}
 
-		batchFiles := files[i:end]
-		logx.Infof("处理第 %d 批照片，共 %d 张", i/batchSize+1, len(batchFiles))
-
-		// 处理这一批照片
-		if err := s.BatchProcessPhotos(ctx, batchFiles, sampleOrderId); err != nil {
-			logx.Errorf("处理照片批次失败: %v", err)
-			return err
+		// 处理订单照片
+		err := s.processOrderPhotos(ctx, order)
+		if err != nil {
+			logx.Errorf("处理订单照片失败, 订单ID: %d, 错误: %v", order.Id, err)
+			// 出错时将订单状态还原
+			_ = s.orderModel.UpdateStatus(ctx, order.Id, model.OrderStatusPending)
+			continue
 		}
 
-		processedCount += len(batchFiles)
-		logx.Infof("已成功处理 %d/%d 张照片", processedCount, len(files))
+		// 更新订单状态为已完成
+		if err := s.orderModel.UpdateStatus(ctx, order.Id, model.OrderStatusCompleted); err != nil {
+			logx.Errorf("更新订单状态失败, 订单ID: %d, 错误: %v", order.Id, err)
+		} else {
+			logx.Infof("订单处理完成, 订单ID: %d, 订单号: %s", order.Id, order.OrderSn)
+		}
 	}
 
-	logx.Infof("照片同步完成，共处理 %d 张照片", processedCount)
+	logx.Info("照片同步完成")
 	return nil
 }
 
-// scanSourceDirectory 扫描源目录中的照片文件
-func (s *PhotoSyncer) scanSourceDirectory() ([]string, error) {
-	var files []string
+// processOrderPhotos 处理订单的照片
+func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order) error {
+	// 查询订单的所有照片
+	photos, err := s.photoModel.FindByOrderId(ctx, order.Id)
+	if err != nil {
+		return fmt.Errorf("查询订单照片失败: %v", err)
+	}
 
-	err := filepath.Walk(s.config.SourcePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// 跳过目录
-		if info.IsDir() {
-			return nil
-		}
-
-		// 只处理图片文件（可以根据实际需求调整）
-		ext := filepath.Ext(path)
-		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
-			files = append(files, path)
-		}
-
+	if len(photos) == 0 {
+		logx.Infof("订单 %d 没有照片需要处理", order.Id)
 		return nil
-	})
-
-	return files, err
-}
-
-// processPhoto 处理单个照片
-func (s *PhotoSyncer) processPhoto(ctx context.Context, filePath string, orderId uint64) error {
-	// 获取文件信息
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return err
 	}
 
-	// 创建照片记录
-	photo := &model.Photo{
-		OrderId: orderId,
-		Url:     filepath.Base(filePath),
-		Size:    fileInfo.Size(),
-		Unit:    "B",
+	logx.Infof("订单 %d 有 %d 张照片需要处理", order.Id, len(photos))
+
+	// 创建以日期为名的目录
+	today := time.Now().Format("2006-01-02")
+	dateDir := filepath.Join(s.config.OutputPath, today)
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		return fmt.Errorf("创建日期目录失败: %v", err)
 	}
 
-	// 使用photoModel保存到数据库
-	_, err = s.photoModel.Insert(ctx, photo)
-	if err != nil {
-		logx.Errorf("保存照片记录失败: %v", err)
-		return err
+	// 创建以收货人姓名-订单号为名的目录
+	orderDir := filepath.Join(dateDir, fmt.Sprintf("%s-%s", order.Receiver, order.OrderSn))
+	if err := os.MkdirAll(orderDir, 0755); err != nil {
+		return fmt.Errorf("创建订单目录失败: %v", err)
 	}
 
-	// 将文件移动到备份目录
-	backupPath := filepath.Join(s.config.BackupPath, strconv.FormatInt(time.Now().Unix(), 10)+"_"+filepath.Base(filePath))
-	return os.Rename(filePath, backupPath)
-}
-
-// BatchProcessPhotos 批量处理照片，可以在事务中执行
-func (s *PhotoSyncer) BatchProcessPhotos(ctx context.Context, files []string, orderId uint64) error {
-	// 这里可以使用事务处理批量插入
-	// 例如：
-	// session := sqlx.NewSessionFromConn(s.db) // 创建会话
-	// session.Begin()  // 开始事务
-	// ... 批量处理逻辑 ...
-	// session.Commit() // 提交事务
-
-	for _, file := range files {
-		if err := s.processPhoto(ctx, file, orderId); err != nil {
-			return err
+	// 创建不同尺寸的子目录
+	sizeMap := make(map[string]string)
+	for _, sizeType := range s.config.SizeTypes {
+		sizeDir := filepath.Join(orderDir, sizeType.Name)
+		if err := os.MkdirAll(sizeDir, 0755); err != nil {
+			return fmt.Errorf("创建尺寸目录失败: %v", err)
 		}
+		sizeMap[sizeType.Name] = sizeDir
+	}
+
+	// 如果没有配置尺寸，创建一个默认目录
+	if len(s.config.SizeTypes) == 0 {
+		defaultDir := filepath.Join(orderDir, "默认尺寸")
+		if err := os.MkdirAll(defaultDir, 0755); err != nil {
+			return fmt.Errorf("创建默认尺寸目录失败: %v", err)
+		}
+		sizeMap["默认尺寸"] = defaultDir
+	}
+
+	// 处理每张照片
+	var successCount, failCount int
+	for _, photo := range photos {
+		// 从URL下载照片
+		// 这里假设照片的尺寸信息包含在Unit字段中，例如"3寸"、"4寸"等
+		// 如果不是，您需要根据实际情况修改这部分逻辑
+		sizeType := photo.Unit
+		if sizeDir, ok := sizeMap[sizeType]; ok {
+			// 使用对应尺寸的目录
+			if err := s.downloadPhoto(ctx, photo.Url, sizeDir, filepath.Base(photo.Url)); err != nil {
+				logx.Errorf("下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
+				failCount++
+				continue
+			}
+		} else {
+			// 使用默认尺寸的目录
+			defaultDir := sizeMap["默认尺寸"]
+			if defaultDir == "" && len(sizeMap) > 0 {
+				// 如果没有默认尺寸目录但有其他尺寸目录，使用第一个
+				for _, dir := range sizeMap {
+					defaultDir = dir
+					break
+				}
+			}
+			if err := s.downloadPhoto(ctx, photo.Url, defaultDir, filepath.Base(photo.Url)); err != nil {
+				logx.Errorf("下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
+				failCount++
+				continue
+			}
+		}
+		successCount++
+	}
+
+	logx.Infof("订单 %d 处理完成, 成功: %d, 失败: %d", order.Id, successCount, failCount)
+	return nil
+}
+
+// downloadPhoto 下载照片
+func (s *PhotoSyncer) downloadPhoto(ctx context.Context, photoUrl, destDir, fileName string) error {
+	// 创建完整的目标文件路径
+	destPath := filepath.Join(destDir, fileName)
+
+	// 解析URL
+	parsedURL, err := url.Parse(photoUrl)
+	if err != nil {
+		return fmt.Errorf("解析URL失败: %v", err)
+	}
+
+	// 确保URL是绝对URL
+	if !parsedURL.IsAbs() {
+		return fmt.Errorf("URL不是绝对URL: %s", photoUrl)
+	}
+
+	// 创建HTTP客户端，设置超时
+	client := &http.Client{
+		Timeout: time.Duration(30) * time.Second,
+	}
+
+	// 创建请求
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, photoUrl, nil)
+	if err != nil {
+		return fmt.Errorf("创建HTTP请求失败: %v", err)
+	}
+
+	// 发送请求
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP响应状态码不是200: %d", resp.StatusCode)
+	}
+
+	// 创建目标文件
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("创建目标文件失败: %v", err)
+	}
+	defer out.Close()
+
+	// 复制内容
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return fmt.Errorf("保存文件内容失败: %v", err)
 	}
 
 	return nil
