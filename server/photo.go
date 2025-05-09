@@ -19,7 +19,11 @@ func main() {
 	var c config.Config
 	conf.MustLoad(*configFile, &c)
 
-	server := rest.MustNewServer(c.RestConf, rest.WithCors("*"))
+	server := rest.MustNewServer(
+		c.RestConf,
+		rest.WithCors("*"),
+		rest.WithCorsHeaders("country,lang"),
+	)
 	defer server.Stop()
 
 	ctx := svc.NewServiceContext(c)
