@@ -8,21 +8,26 @@ import (
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"photo-kits-server/server/job/photoSync/config"
 	"photo-kits-server/server/model"
 )
 
 // PhotoSyncer 照片同步器
 type PhotoSyncer struct {
-	photoModel model.PhotoModel
 	config     config.SyncConfig
+	db         sqlx.SqlConn
+	photoModel model.PhotoModel
+	orderModel model.OrderModel
 }
 
 // NewPhotoSyncer 创建一个新的照片同步器
-func NewPhotoSyncer(photoModel model.PhotoModel, config config.SyncConfig) *PhotoSyncer {
+func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer {
 	return &PhotoSyncer{
-		photoModel: photoModel,
-		config:     config,
+		config:     syncConfig,
+		db:         db,
+		photoModel: model.NewPhotoModel(db),
+		orderModel: model.NewOrderModel(db), // 如果需要处理订单，添加orderModel
 	}
 }
 
@@ -42,26 +47,54 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return err
 	}
 
-	// TODO: 实现实际的同步逻辑
-	// 1. 扫描源目录中的照片文件
-	// 2. 处理照片元数据
-	// 3. 根据需要将照片保存到数据库
-	// 4. 移动已处理的照片到备份目录
-
-	// 这里是示例代码，实际实现需要根据具体需求开发
+	// 扫描源目录中的照片文件
 	files, err := s.scanSourceDirectory()
 	if err != nil {
+		logx.Errorf("扫描源目录失败: %v", err)
 		return err
 	}
 
-	for _, file := range files {
-		// 处理每个文件
-		logx.Infof("处理文件: %s", file)
+	logx.Infof("找到 %d 个照片文件需要处理", len(files))
 
-		// 在这里添加实际的处理逻辑
+	if len(files) == 0 {
+		logx.Info("没有找到需要处理的照片文件")
+		return nil
 	}
 
-	logx.Info("照片同步完成")
+	// 按批次处理文件，每批次处理s.config.BatchSize个文件
+	// 这里只是示例，实际业务逻辑需要根据具体需求调整
+	// 例如：可以根据文件名或目录结构识别照片所属的订单ID
+	//
+	// 示例：假设所有照片都属于同一个订单（orderId = 1）
+	// 实际应用中，您需要根据业务逻辑确定每个照片的orderId
+
+	var processedCount int
+	batchSize := s.config.BatchSize
+
+	// 模拟一个订单ID，实际应用中需要根据业务逻辑获取
+	// 例如：可以从文件名、目录名等提取订单ID
+	var sampleOrderId uint64 = 1
+
+	for i := 0; i < len(files); i += batchSize {
+		end := i + batchSize
+		if end > len(files) {
+			end = len(files)
+		}
+
+		batchFiles := files[i:end]
+		logx.Infof("处理第 %d 批照片，共 %d 张", i/batchSize+1, len(batchFiles))
+
+		// 处理这一批照片
+		if err := s.BatchProcessPhotos(ctx, batchFiles, sampleOrderId); err != nil {
+			logx.Errorf("处理照片批次失败: %v", err)
+			return err
+		}
+
+		processedCount += len(batchFiles)
+		logx.Infof("已成功处理 %d/%d 张照片", processedCount, len(files))
+	}
+
+	logx.Infof("照片同步完成，共处理 %d 张照片", processedCount)
 	return nil
 }
 
@@ -107,13 +140,32 @@ func (s *PhotoSyncer) processPhoto(ctx context.Context, filePath string, orderId
 		Unit:    "B",
 	}
 
-	// 保存到数据库
+	// 使用photoModel保存到数据库
 	_, err = s.photoModel.Insert(ctx, photo)
 	if err != nil {
+		logx.Errorf("保存照片记录失败: %v", err)
 		return err
 	}
 
 	// 将文件移动到备份目录
 	backupPath := filepath.Join(s.config.BackupPath, strconv.FormatInt(time.Now().Unix(), 10)+"_"+filepath.Base(filePath))
 	return os.Rename(filePath, backupPath)
+}
+
+// BatchProcessPhotos 批量处理照片，可以在事务中执行
+func (s *PhotoSyncer) BatchProcessPhotos(ctx context.Context, files []string, orderId uint64) error {
+	// 这里可以使用事务处理批量插入
+	// 例如：
+	// session := sqlx.NewSessionFromConn(s.db) // 创建会话
+	// session.Begin()  // 开始事务
+	// ... 批量处理逻辑 ...
+	// session.Commit() // 提交事务
+
+	for _, file := range files {
+		if err := s.processPhoto(ctx, file, orderId); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
