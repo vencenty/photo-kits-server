@@ -8,7 +8,6 @@ import (
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"photo-kits-server/server/job/photoSync/config"
 	syncpkg "photo-kits-server/server/job/photoSync/sync"
-	"photo-kits-server/server/model"
 	"time"
 )
 
