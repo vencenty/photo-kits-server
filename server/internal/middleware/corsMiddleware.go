@@ -6,8 +6,14 @@ import (
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
+type CorsMiddleware struct{}
+
+func NewCorsMiddleware() *CorsMiddleware {
+	return &CorsMiddleware{}
+}
+
 // CorsMiddleware 跨域中间件
-func CorsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func (c *CorsMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 设置允许的源
 		w.Header().Set("Access-Control-Allow-Origin", "*")

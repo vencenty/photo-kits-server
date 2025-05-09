@@ -40,6 +40,8 @@ type SubmitResponse {
 
 @server (
     group: photo
+    // 通过 middileware 关键字声明中间件，多个中间件以英文逗号分割，如 UserAgentMiddleware,LogMiddleware
+    middleware: CorsMiddleware
 )
 
 service photo-api {
@@ -50,5 +52,8 @@ service photo-api {
     // 提交订单
     @handler Submit
     post /api/order/submit (SubmitRequest) returns (SubmitResponse)
+
+    @handler Ping
+    get /api/ping returns (string)
 }
 
