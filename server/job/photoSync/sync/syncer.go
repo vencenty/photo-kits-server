@@ -44,6 +44,12 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return err
 	}
 
+	// 首先处理失败的照片，进行重试
+	if err := s.retryFailedPhotos(ctx); err != nil {
+		logx.Errorf("重试失败照片时出错: %v", err)
+		// 继续处理新订单，不中断整个过程
+	}
+
 	// 获取待处理订单
 	batchSize := s.config.BatchSize
 	pendingOrders, err := s.orderModel.FindPendingOrders(ctx, batchSize)
@@ -88,6 +94,114 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	return nil
 }
 
+// retryFailedPhotos 重试下载失败的照片
+func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) error {
+	failedPhotos, err := s.photoModel.FindFailedPhotos(ctx, s.config.BatchSize)
+	if err != nil {
+		return fmt.Errorf("查询失败照片出错: %v", err)
+	}
+
+	if len(failedPhotos) == 0 {
+		logx.Info("没有找到需要重试的失败照片")
+		return nil
+	}
+
+	logx.Infof("找到 %d 张失败照片需要重试", len(failedPhotos))
+
+	// 按订单ID分组
+	photosByOrder := make(map[uint64][]*model.Photo)
+	for _, photo := range failedPhotos {
+		photosByOrder[photo.OrderId] = append(photosByOrder[photo.OrderId], photo)
+	}
+
+	// 处理每个订单的失败照片
+	var successCount, failCount int
+	for orderId, photos := range photosByOrder {
+		// 查询订单信息
+		order, err := s.orderModel.FindOne(ctx, orderId)
+		if err != nil {
+			logx.Errorf("查询订单信息失败, 订单ID: %d, 错误: %v", orderId, err)
+			continue
+		}
+
+		// 创建目录结构
+		orderDir, err := s.createOrderDirectories(order)
+		if err != nil {
+			logx.Errorf("为订单创建目录失败, 订单ID: %d, 错误: %v", orderId, err)
+			continue
+		}
+
+		// 按照照片的size和unit分组
+		sizeDirs := make(map[string]string)
+
+		// 重试下载每张照片
+		for _, photo := range photos {
+			// 生成尺寸目录名 (例如: "3inch")
+			sizeDir := fmt.Sprintf("%d%s", photo.Size, photo.Unit)
+
+			// 检查该尺寸的目录是否已创建
+			if _, exists := sizeDirs[sizeDir]; !exists {
+				// 创建尺寸目录
+				fullSizeDir := filepath.Join(orderDir, sizeDir)
+				if err := os.MkdirAll(fullSizeDir, 0755); err != nil {
+					errMsg := fmt.Sprintf("创建尺寸目录失败 %s: %v", sizeDir, err)
+					logx.Error(errMsg)
+					// 更新照片状态为失败
+					if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
+						logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, updateErr)
+					}
+					failCount++
+					continue
+				}
+				sizeDirs[sizeDir] = fullSizeDir
+			}
+
+			// 下载照片到对应的目录
+			destDir := sizeDirs[sizeDir]
+			fileName := filepath.Base(photo.Url)
+
+			if err := s.downloadPhoto(ctx, photo.Url, destDir, fileName); err != nil {
+				errMsg := fmt.Sprintf("下载照片失败: %v", err)
+				logx.Errorf("重试下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
+				// 更新照片状态为失败，并记录错误信息
+				if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
+					logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, updateErr)
+				}
+				failCount++
+				continue
+			}
+
+			// 更新照片状态为成功
+			if err := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusSuccess, ""); err != nil {
+				logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, err)
+			}
+
+			successCount++
+		}
+	}
+
+	logx.Infof("重试完成, 成功: %d, 失败: %d", successCount, failCount)
+	return nil
+}
+
+// createOrderDirectories 创建订单的目录结构，返回订单目录路径
+func (s *PhotoSyncer) createOrderDirectories(order *model.Order) (string, error) {
+	// 创建以日期为名的目录
+	today := time.Now().Format("2006-01-02")
+	dateDir := filepath.Join(s.config.OutputPath, today)
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		return "", fmt.Errorf("创建日期目录失败: %v", err)
+	}
+
+	// 创建以收货人姓名-订单号为名的目录
+	orderDir := filepath.Join(dateDir, fmt.Sprintf("%s-%s", order.Receiver, order.OrderSn))
+	if err := os.MkdirAll(orderDir, 0755); err != nil {
+		return "", fmt.Errorf("创建订单目录失败: %v", err)
+	}
+
+	return orderDir, nil
+}
+
 // processOrderPhotos 处理订单的照片
 func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order) error {
 	// 查询订单的所有照片
@@ -103,72 +217,64 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 
 	logx.Infof("订单 %d 有 %d 张照片需要处理", order.Id, len(photos))
 
-	// 创建以日期为名的目录
-	today := time.Now().Format("2006-01-02")
-	dateDir := filepath.Join(s.config.OutputPath, today)
-	if err := os.MkdirAll(dateDir, 0755); err != nil {
-		return fmt.Errorf("创建日期目录失败: %v", err)
+	// 创建订单目录
+	orderDir, err := s.createOrderDirectories(order)
+	if err != nil {
+		return err
 	}
 
-	// 创建以收货人姓名-订单号为名的目录
-	orderDir := filepath.Join(dateDir, fmt.Sprintf("%s-%s", order.Receiver, order.OrderSn))
-	if err := os.MkdirAll(orderDir, 0755); err != nil {
-		return fmt.Errorf("创建订单目录失败: %v", err)
-	}
-
-	// 创建不同尺寸的子目录
-	sizeMap := make(map[string]string)
-	for _, sizeType := range s.config.SizeTypes {
-		sizeDir := filepath.Join(orderDir, sizeType.Name)
-		if err := os.MkdirAll(sizeDir, 0755); err != nil {
-			return fmt.Errorf("创建尺寸目录失败: %v", err)
-		}
-		sizeMap[sizeType.Name] = sizeDir
-	}
-
-	// 如果没有配置尺寸，创建一个默认目录
-	if len(s.config.SizeTypes) == 0 {
-		defaultDir := filepath.Join(orderDir, "默认尺寸")
-		if err := os.MkdirAll(defaultDir, 0755); err != nil {
-			return fmt.Errorf("创建默认尺寸目录失败: %v", err)
-		}
-		sizeMap["默认尺寸"] = defaultDir
-	}
+	// 按照照片的size和unit分组
+	sizeDirs := make(map[string]string)
 
 	// 处理每张照片
 	var successCount, failCount int
+
 	for _, photo := range photos {
-		// 从URL下载照片
-		// 这里假设照片的尺寸信息包含在Unit字段中，例如"3寸"、"4寸"等
-		// 如果不是，您需要根据实际情况修改这部分逻辑
-		sizeType := photo.Unit
-		if sizeDir, ok := sizeMap[sizeType]; ok {
-			// 使用对应尺寸的目录
-			if err := s.downloadPhoto(ctx, photo.Url, sizeDir, filepath.Base(photo.Url)); err != nil {
-				logx.Errorf("下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
-				failCount++
-				continue
-			}
-		} else {
-			// 使用默认尺寸的目录
-			defaultDir := sizeMap["默认尺寸"]
-			if defaultDir == "" && len(sizeMap) > 0 {
-				// 如果没有默认尺寸目录但有其他尺寸目录，使用第一个
-				for _, dir := range sizeMap {
-					defaultDir = dir
-					break
+		// 生成尺寸目录名 (例如: "3inch")
+		sizeDir := fmt.Sprintf("%d%s", photo.Size, photo.Unit)
+
+		// 检查该尺寸的目录是否已创建
+		if _, exists := sizeDirs[sizeDir]; !exists {
+			// 创建尺寸目录
+			fullSizeDir := filepath.Join(orderDir, sizeDir)
+			if err := os.MkdirAll(fullSizeDir, 0755); err != nil {
+				errMsg := fmt.Sprintf("创建尺寸目录失败 %s: %v", sizeDir, err)
+				logx.Error(errMsg)
+				// 更新照片状态为失败
+				if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
+					logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, updateErr)
 				}
-			}
-			if err := s.downloadPhoto(ctx, photo.Url, defaultDir, filepath.Base(photo.Url)); err != nil {
-				logx.Errorf("下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
 				failCount++
 				continue
 			}
+			sizeDirs[sizeDir] = fullSizeDir
 		}
+
+		// 下载照片到对应的目录
+		destDir := sizeDirs[sizeDir]
+		fileName := filepath.Base(photo.Url)
+
+		if err := s.downloadPhoto(ctx, photo.Url, destDir, fileName); err != nil {
+			errMsg := fmt.Sprintf("下载照片失败: %v", err)
+			logx.Errorf("下载照片失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
+			// 更新照片状态为失败，并记录错误信息
+			if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
+				logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, updateErr)
+			}
+			failCount++
+			continue
+		}
+
+		// 更新照片状态为成功
+		if err := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusSuccess, ""); err != nil {
+			logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, err)
+		}
+
 		successCount++
 	}
 
 	logx.Infof("订单 %d 处理完成, 成功: %d, 失败: %d", order.Id, successCount, failCount)
+
 	return nil
 }
 
