@@ -4,8 +4,7 @@
 package types
 
 type Photo struct {
-	Size int64    `json:"size"`
-	Unit string   `json:"unit"`
+	Spec string   `json:"spec"`
 	Urls []string `json:"urls"`
 }
 

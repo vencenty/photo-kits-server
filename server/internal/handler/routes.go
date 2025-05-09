@@ -14,25 +14,22 @@ import (
 
 func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 	server.AddRoutes(
-		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.CorsMiddleware},
-			[]rest.Route{
-				{
-					Method:  http.MethodPost,
-					Path:    "/api/order/submit",
-					Handler: photo.SubmitHandler(serverCtx),
-				},
-				{
-					Method:  http.MethodPost,
-					Path:    "/api/photo/upload",
-					Handler: photo.UploadHandler(serverCtx),
-				},
-				{
-					Method:  http.MethodGet,
-					Path:    "/api/ping",
-					Handler: photo.PingHandler(serverCtx),
-				},
-			}...,
-		),
+		[]rest.Route{
+			{
+				Method:  http.MethodPost,
+				Path:    "/api/order/submit",
+				Handler: photo.SubmitHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
+				Path:    "/api/photo/upload",
+				Handler: photo.UploadHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodGet,
+				Path:    "/api/ping",
+				Handler: photo.PingHandler(serverCtx),
+			},
+		},
 	)
 }

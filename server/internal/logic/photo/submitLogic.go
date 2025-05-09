@@ -97,8 +97,7 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 			p := &model.Photo{
 				OrderId:   order.Id,
 				Url:       url,
-				Size:      photo.Size,
-				Unit:      photo.Unit,
+				Spec:      photo.Spec,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}

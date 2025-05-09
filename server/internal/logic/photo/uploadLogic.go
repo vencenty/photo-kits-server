@@ -9,8 +9,10 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"io"
 	"net/http"
+	"path/filepath"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
+	"strings"
 )
 
 type UploadLogic struct {
@@ -47,6 +49,22 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	sha1Bytes := hasher.Sum(nil)
 	fileSha1Sum := hex.EncodeToString(sha1Bytes)
 
+	// 获取文件扩展名
+	ext := filepath.Ext(handler.Filename)
+	if ext == "" {
+		// 如果没有扩展名，尝试从Content-Type中获取
+		contentType := handler.Header.Get("Content-Type")
+		if strings.HasPrefix(contentType, "image/") {
+			ext = "." + strings.TrimPrefix(contentType, "image/")
+		}
+	}
+
+	// 使用SHA1哈希值加上原始扩展名作为文件名
+	objectName := fileSha1Sum
+	if ext != "" {
+		objectName = fileSha1Sum + ext
+	}
+
 	// 初始化客户端
 	minioClient, err := minio.New(l.svcCtx.Config.Minio.Endpoint,
 		l.svcCtx.Config.Minio.AccessKey,
@@ -61,7 +79,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 	// 写入bucket
 	_, err = minioClient.PutObject(
 		l.svcCtx.Config.Minio.Bucket,
-		fileSha1Sum,
+		objectName,
 		teeReader,
 		handler.Size,
 		minio.PutObjectOptions{ContentType: handler.Header.Get("Content-Type")},
@@ -76,7 +94,7 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		Filename: handler.Filename,
 		Size:     handler.Size,
 		Sha1:     fileSha1Sum,
-		URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.Minio.Schema, l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, fileSha1Sum),
+		URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.Minio.Schema, l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, objectName),
 	}, nil
 
 }

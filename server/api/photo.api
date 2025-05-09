@@ -13,10 +13,7 @@ type UploadResponse {
 }
 
 type Photo {
-    // 尺寸
-    Size int64 `json:"size"`
-    // 照片尺寸单位，寸还是啥
-    Unit string `json:"unit"`
+    Spec string `json:"spec"`
     // 照片链接
     Urls []string `json:"urls"`
 }
@@ -38,10 +35,10 @@ type SubmitResponse {
     Total int64 `json:"total"`
 }
 
-@server (
+@server(
     group: photo
     // 通过 middileware 关键字声明中间件，多个中间件以英文逗号分割，如 UserAgentMiddleware,LogMiddleware
-    middleware: CorsMiddleware
+    //    middleware: CorsMiddleware
 )
 
 service photo-api {
