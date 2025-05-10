@@ -40,9 +40,10 @@ type (
 		Id        uint64    `db:"id"`
 		OrderId   uint64    `db:"order_id"`
 		Url       string    `db:"url"`
-		Spec      string    `db:"spec"`   // 规格。客户端自己定义的。
-		Error     string    `db:"error"`  // 错误信息
-		Status    int64     `db:"status"` // 0:未下载，1:下载成功, -1：下载失败
+		ThumbUrl  string    `db:"thumb_url"` // 缩略图url
+		Spec      string    `db:"spec"`      // 规格。客户端自己定义的。
+		Error     string    `db:"error"`     // 错误信息
+		Status    int64     `db:"status"`    // 0:未下载，1:下载成功, -1：下载失败
 		CreatedAt time.Time `db:"created_at"`
 		UpdatedAt time.Time `db:"updated_at"`
 	}
@@ -76,14 +77,14 @@ func (m *defaultPhotoModel) FindOne(ctx context.Context, id uint64) (*Photo, err
 }
 
 func (m *defaultPhotoModel) Insert(ctx context.Context, data *Photo) (sql.Result, error) {
-	query := fmt.Sprintf("insert into %s (%s) values (?, ?, ?, ?, ?)", m.table, photoRowsExpectAutoSet)
-	ret, err := m.conn.ExecCtx(ctx, query, data.OrderId, data.Url, data.Spec, data.Error, data.Status)
+	query := fmt.Sprintf("insert into %s (%s) values (?, ?, ?, ?, ?, ?)", m.table, photoRowsExpectAutoSet)
+	ret, err := m.conn.ExecCtx(ctx, query, data.OrderId, data.Url, data.ThumbUrl, data.Spec, data.Error, data.Status)
 	return ret, err
 }
 
 func (m *defaultPhotoModel) Update(ctx context.Context, data *Photo) error {
 	query := fmt.Sprintf("update %s set %s where `id` = ?", m.table, photoRowsWithPlaceHolder)
-	_, err := m.conn.ExecCtx(ctx, query, data.OrderId, data.Url, data.Spec, data.Error, data.Status, data.Id)
+	_, err := m.conn.ExecCtx(ctx, query, data.OrderId, data.Url, data.ThumbUrl, data.Spec, data.Error, data.Status, data.Id)
 	return err
 }
 
