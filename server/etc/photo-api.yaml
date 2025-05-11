@@ -14,3 +14,9 @@ Minio:
   SecretKey: "VzIwRXMEk7A4ZjWUKiNvXW1xAEB6DmfsK20bv98e"
   UseSSL: true
   Bucket: "user-photos"
+
+# 照片同步任务配置
+SyncConfig:
+  BatchSize: 100                                    # 每批处理的订单数量
+  Timeout: 3600                                     # 同步超时时间（秒）
+  OutputPath: "/vol3/1000/Backup/user-photos"       # 照片输出路径

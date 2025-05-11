@@ -38,6 +38,7 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 // SyncPhotos 执行照片同步操作，扫描待处理订单并创建目录结构
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	logx.Info("开始同步照片...")
+	logx.Infof("输出根目录：%s", s.config.OutputPath)
 
 	// 检查输出目录是否存在，不存在则创建
 	if err := os.MkdirAll(s.config.OutputPath, 0755); err != nil {
@@ -68,6 +69,10 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 
 	// 处理每个订单
 	for _, order := range pendingOrders {
+		logx.Infof("===== 开始处理订单 =====")
+		logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s, 备注: %s",
+			order.Id, order.OrderSn, order.Receiver, order.Remark)
+
 		// 更新订单状态为处理中
 		if err := s.orderModel.UpdateStatus(ctx, order.Id, model.OrderStatusProcessing); err != nil {
 			logx.Errorf("更新订单状态失败, 订单ID: %d, 错误: %v", order.Id, err)
@@ -89,6 +94,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		} else {
 			logx.Infof("订单处理完成, 订单ID: %d, 订单号: %s", order.Id, order.OrderSn)
 		}
+		logx.Infof("===== 订单处理结束 =====")
 	}
 
 	logx.Info("照片同步完成")
@@ -203,6 +209,9 @@ func (s *PhotoSyncer) createOrderDirectories(order *model.Order) (string, error)
 		return "", fmt.Errorf("创建订单目录失败: %v", err)
 	}
 
+	// 输出详细的目录路径
+	logx.Infof("为订单 %s 创建目录: %s", order.OrderSn, orderDir)
+
 	return orderDir, nil
 }
 
@@ -233,17 +242,20 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 	// 处理每张照片
 	var successCount, failCount int
 
-	for _, photo := range photos {
+	for i, photo := range photos {
 		// 使用规格作为目录名
 		spec := photo.Spec
 		if spec == "" {
 			spec = "默认规格" // 如果规格为空，使用默认规格
 		}
+		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, URL: %s",
+			i+1, len(photos), photo.Id, spec, photo.Url)
 
 		// 检查该规格的目录是否已创建
 		if _, exists := specDirs[spec]; !exists {
 			// 创建规格目录
 			fullSpecDir := filepath.Join(orderDir, spec)
+			logx.Infof("创建规格目录: %s", fullSpecDir)
 			if err := os.MkdirAll(fullSpecDir, 0755); err != nil {
 				errMsg := fmt.Sprintf("创建规格目录失败 %s: %v", spec, err)
 				logx.Error(errMsg)
@@ -260,6 +272,8 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 		// 下载照片到对应的目录
 		destDir := specDirs[spec]
 		fileName := getCleanFileName(photo.Url)
+		logx.Infof("开始下载照片: ID: %d, 目标文件名: %s, 目标目录: %s",
+			photo.Id, fileName, destDir)
 
 		if err := s.downloadPhoto(ctx, photo.Url, destDir, fileName); err != nil {
 			errMsg := fmt.Sprintf("下载照片失败: %v", err)
@@ -272,6 +286,9 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 			continue
 		}
 
+		logx.Infof("照片下载成功: ID: %d, 保存路径: %s",
+			photo.Id, filepath.Join(destDir, fileName))
+
 		// 更新照片状态为成功
 		if err := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusSuccess, ""); err != nil {
 			logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photo.Id, err)
@@ -280,7 +297,8 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 		successCount++
 	}
 
-	logx.Infof("订单 %d 处理完成, 成功: %d, 失败: %d", order.Id, successCount, failCount)
+	logx.Infof("订单 %s (ID: %d) 处理完成, 成功: %d, 失败: %d, 总目录: %s",
+		order.OrderSn, order.Id, successCount, failCount, orderDir)
 
 	return nil
 }
@@ -289,6 +307,7 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 func (s *PhotoSyncer) downloadPhoto(ctx context.Context, photoUrl, destDir, fileName string) error {
 	// 创建完整的目标文件路径
 	destPath := filepath.Join(destDir, fileName)
+	logx.Infof("下载照片到: %s", destPath)
 
 	// 解析URL
 	parsedURL, err := url.Parse(photoUrl)
