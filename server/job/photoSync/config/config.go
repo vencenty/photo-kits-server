@@ -36,7 +36,7 @@ type MinioConfig struct {
 type SyncConfig struct {
 	BatchSize  int    `json:",default=100"`
 	Timeout    int    `json:",default=3600"` // 同步超时时间（秒）
-	SourcePath string `json:",default=./data/photos"`
+	SourcePath string `json:",default=/Users/yanchengtian/Workspace/MyProjects/photo-kits/abc"`
 	BackupPath string `json:",default=./data/backup"`
-	OutputPath string `json:",default=./data/output"`
+	OutputPath string `json:",default=/Users/yanchengtian/Workspace/MyProjects/photo-kits/abc"`
 }

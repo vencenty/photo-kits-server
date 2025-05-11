@@ -1,3 +1,6 @@
+PHOTO_SERVER_DIR:= ./server
+PHOTO_BIN_DIR:= $(PHOTO_SERVER_DIR)/cmd
+PHOTO_JOB_DIR := $(PHOTO_SERVER_DIR)/job
 
 gen-model:
 	echo "开始生成数据库model..."
@@ -9,4 +12,10 @@ gen-model:
 gen-api:
 	echo "开始生成api..."
 	goctl api go -api ./server/api/server.api -dir ./server --style=goZero
+
+
+build:
+	mkdir -p $(PHOTO_BIN_DIR)
+	GOOS=linux GOARCH=amd64 go build -o $(PHOTO_BIN_DIR)/main-server $(PHOTO_SERVER_DIR)/photo.go
+	GOOS=linux GOARCH=amd64 go build -o $(PHOTO_BIN_DIR)/photo-sync $(PHOTO_JOB_DIR)/photoSync/main.go
 

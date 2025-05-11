@@ -85,7 +85,6 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	}
 
 	// 把照片数据关联给订单
-
 	photos := make([]*model.Photo, 0)
 	for _, photo := range req.Photos {
 		// 添加每个URL对应的照片记录
@@ -97,7 +96,10 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 			p := &model.Photo{
 				OrderId:   order.Id,
 				Url:       url,
+				ThumbUrl:  url, // 添加缩略图URL，暂时与原URL相同
 				Spec:      photo.Spec,
+				Status:    model.PhotoStatusPending, // 设置为待处理状态
+				Error:     "",                       // 初始化错误信息为空
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}
@@ -108,9 +110,14 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 
 	for _, photo := range photos {
 		if _, err = l.photoModel.Insert(l.ctx, photo); err != nil {
+			logx.Errorf("插入照片记录失败: orderID=%d, url=%s, spec=%s, 错误: %v",
+				photo.OrderId, photo.Url, photo.Spec, err)
 			return nil, err
 		}
 	}
+
+	logx.Infof("订单提交成功: orderSn=%s, receiverName=%s, 共%d张照片",
+		req.OrderSn, req.Receiver, totalPhotos)
 
 	resp = new(types.SubmitResponse)
 	resp.Total = totalPhotos

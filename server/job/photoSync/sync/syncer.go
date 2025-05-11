@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -131,20 +132,23 @@ func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) error {
 			continue
 		}
 
-		// 按照照片的size和unit分组
-		sizeDirs := make(map[string]string)
+		// 按照照片的规格分组
+		specDirs := make(map[string]string)
 
 		// 重试下载每张照片
 		for _, photo := range photos {
-			// 生成尺寸目录名 (例如: "3inch")
-			sizeDir := fmt.Sprintf("%d%s", photo.Size, photo.Unit)
+			// 使用规格作为目录名
+			spec := photo.Spec
+			if spec == "" {
+				spec = "默认规格" // 如果规格为空，使用默认规格
+			}
 
-			// 检查该尺寸的目录是否已创建
-			if _, exists := sizeDirs[sizeDir]; !exists {
-				// 创建尺寸目录
-				fullSizeDir := filepath.Join(orderDir, sizeDir)
-				if err := os.MkdirAll(fullSizeDir, 0755); err != nil {
-					errMsg := fmt.Sprintf("创建尺寸目录失败 %s: %v", sizeDir, err)
+			// 检查该规格的目录是否已创建
+			if _, exists := specDirs[spec]; !exists {
+				// 创建规格目录
+				fullSpecDir := filepath.Join(orderDir, spec)
+				if err := os.MkdirAll(fullSpecDir, 0755); err != nil {
+					errMsg := fmt.Sprintf("创建规格目录失败 %s: %v", spec, err)
 					logx.Error(errMsg)
 					// 更新照片状态为失败
 					if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
@@ -153,12 +157,12 @@ func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) error {
 					failCount++
 					continue
 				}
-				sizeDirs[sizeDir] = fullSizeDir
+				specDirs[spec] = fullSpecDir
 			}
 
 			// 下载照片到对应的目录
-			destDir := sizeDirs[sizeDir]
-			fileName := filepath.Base(photo.Url)
+			destDir := specDirs[spec]
+			fileName := getCleanFileName(photo.Url)
 
 			if err := s.downloadPhoto(ctx, photo.Url, destDir, fileName); err != nil {
 				errMsg := fmt.Sprintf("下载照片失败: %v", err)
@@ -223,22 +227,25 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 		return err
 	}
 
-	// 按照照片的size和unit分组
-	sizeDirs := make(map[string]string)
+	// 按照照片的规格分组
+	specDirs := make(map[string]string)
 
 	// 处理每张照片
 	var successCount, failCount int
 
 	for _, photo := range photos {
-		// 生成尺寸目录名 (例如: "3inch")
-		sizeDir := fmt.Sprintf("%d%s", photo.Size, photo.Unit)
+		// 使用规格作为目录名
+		spec := photo.Spec
+		if spec == "" {
+			spec = "默认规格" // 如果规格为空，使用默认规格
+		}
 
-		// 检查该尺寸的目录是否已创建
-		if _, exists := sizeDirs[sizeDir]; !exists {
-			// 创建尺寸目录
-			fullSizeDir := filepath.Join(orderDir, sizeDir)
-			if err := os.MkdirAll(fullSizeDir, 0755); err != nil {
-				errMsg := fmt.Sprintf("创建尺寸目录失败 %s: %v", sizeDir, err)
+		// 检查该规格的目录是否已创建
+		if _, exists := specDirs[spec]; !exists {
+			// 创建规格目录
+			fullSpecDir := filepath.Join(orderDir, spec)
+			if err := os.MkdirAll(fullSpecDir, 0755); err != nil {
+				errMsg := fmt.Sprintf("创建规格目录失败 %s: %v", spec, err)
 				logx.Error(errMsg)
 				// 更新照片状态为失败
 				if updateErr := s.photoModel.UpdateStatus(ctx, photo.Id, model.PhotoStatusFailed, errMsg); updateErr != nil {
@@ -247,12 +254,12 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 				failCount++
 				continue
 			}
-			sizeDirs[sizeDir] = fullSizeDir
+			specDirs[spec] = fullSpecDir
 		}
 
 		// 下载照片到对应的目录
-		destDir := sizeDirs[sizeDir]
-		fileName := filepath.Base(photo.Url)
+		destDir := specDirs[spec]
+		fileName := getCleanFileName(photo.Url)
 
 		if err := s.downloadPhoto(ctx, photo.Url, destDir, fileName); err != nil {
 			errMsg := fmt.Sprintf("下载照片失败: %v", err)
@@ -331,4 +338,18 @@ func (s *PhotoSyncer) downloadPhoto(ctx context.Context, photoUrl, destDir, file
 	}
 
 	return nil
+}
+
+// 添加一个工具函数来获取没有查询参数的文件名
+// getCleanFileName 从URL中提取不含查询参数的文件名
+func getCleanFileName(fileUrl string) string {
+	// 先获取URL的基本文件名
+	fileName := filepath.Base(fileUrl)
+
+	// 移除查询参数部分
+	if queryIndex := strings.Index(fileName, "?"); queryIndex > 0 {
+		fileName = fileName[:queryIndex]
+	}
+
+	return fileName
 }
