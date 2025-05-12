@@ -3,6 +3,19 @@
 
 package types
 
+type OrderInfoRequest struct {
+	OrderSn string `json:"order_sn"`
+}
+
+type OrderInfoResponse struct {
+	OrderSn   string  `json:"order_sn"`
+	Receiver  string  `json:"receiver"`
+	Remark    string  `json:"remark"`
+	Status    int64   `json:"status"`
+	CreatedAt string  `json:"created_at"`
+	Photos    []Photo `json:"photos"`
+}
+
 type Photo struct {
 	Spec string   `json:"spec"`
 	Urls []string `json:"urls"`

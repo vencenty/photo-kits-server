@@ -17,6 +17,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 		[]rest.Route{
 			{
 				Method:  http.MethodPost,
+				Path:    "/api/order/info",
+				Handler: photo.OrderInfoHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
 				Path:    "/api/order/submit",
 				Handler: photo.SubmitHandler(serverCtx),
 			},
