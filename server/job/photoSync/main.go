@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var configFile = flag.String("f", "etc/photo-api.yaml", "配置文件路径")
+var configFile = flag.String("f", "server/etc/photo-api.yaml", "配置文件路径")
 
 func main() {
 	flag.Parse()

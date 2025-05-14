@@ -73,6 +73,8 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		order.Receiver = req.Receiver
 		order.Remark = req.Remark
 		order.UpdatedAt = time.Now()
+		// 改为代处理状态，让系统重新同步一次
+		order.Status = model.OrderStatusPending
 
 		if err = l.orderModel.Update(l.ctx, order); err != nil {
 			return nil, err

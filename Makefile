@@ -17,8 +17,8 @@ gen-api:
 build:
 	echo "开始构建..."
 	mkdir -p $(PHOTO_BIN_DIR)
-	GOOS=linux GOARCH=amd64 go build -o $(PHOTO_BIN_DIR)/main-server $(PHOTO_SERVER_DIR)/photo.go
-	GOOS=linux GOARCH=amd64 go build -o $(PHOTO_BIN_DIR)/photo-sync $(PHOTO_JOB_DIR)/photoSync/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -tags no_k8s -o $(PHOTO_BIN_DIR)/main-server $(PHOTO_SERVER_DIR)/photo.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -tags no_k8s -o $(PHOTO_BIN_DIR)/photo-sync $(PHOTO_JOB_DIR)/photoSync/main.go
 
 	echo "构建完成，请在 $(PHOTO_BIN_DIR) 目录下查看构建结果"
 

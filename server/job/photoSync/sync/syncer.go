@@ -138,6 +138,13 @@ func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) error {
 			continue
 		}
 
+		// 清空订单目录中的所有内容，确保每次同步都是最新的照片集合
+		if err := s.cleanOrderDirectory(orderDir); err != nil {
+			logx.Errorf("清空订单目录失败: %v", err)
+			continue
+		}
+		logx.Infof("已清空订单目录: %s", orderDir)
+
 		// 按照照片的规格分组
 		specDirs := make(map[string]string)
 
@@ -235,6 +242,13 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 	if err != nil {
 		return err
 	}
+
+	// 清空订单目录中的所有内容，确保每次同步都是最新的照片集合
+	if err := s.cleanOrderDirectory(orderDir); err != nil {
+		logx.Errorf("清空订单目录失败: %v", err)
+		return err
+	}
+	logx.Infof("已清空订单目录: %s", orderDir)
 
 	// 按照照片的规格分组
 	specDirs := make(map[string]string)
@@ -371,4 +385,36 @@ func getCleanFileName(fileUrl string) string {
 	}
 
 	return fileName
+}
+
+// cleanOrderDirectory 清空订单目录中的所有内容
+func (s *PhotoSyncer) cleanOrderDirectory(orderDir string) error {
+	// 打开订单目录
+	dir, err := os.Open(orderDir)
+	if err != nil {
+		return fmt.Errorf("打开订单目录失败: %v", err)
+	}
+	defer dir.Close()
+
+	// 读取目录中的所有文件和子目录
+	files, err := dir.Readdir(0)
+	if err != nil {
+		return fmt.Errorf("读取目录内容失败: %v", err)
+	}
+
+	// 遍历所有文件和子目录，删除它们
+	for _, file := range files {
+		filePath := filepath.Join(orderDir, file.Name())
+		if file.IsDir() {
+			if err := os.RemoveAll(filePath); err != nil {
+				return fmt.Errorf("删除目录失败: %v", err)
+			}
+		} else {
+			if err := os.Remove(filePath); err != nil {
+				return fmt.Errorf("删除文件失败: %v", err)
+			}
+		}
+	}
+
+	return nil
 }
