@@ -24,6 +24,7 @@ type (
 		orderModel
 		withSession(session sqlx.Session) OrderModel
 		FindPendingOrders(ctx context.Context, limit int) ([]*Order, error)
+		FindProcessingOrders(ctx context.Context, limit int) ([]*Order, error)
 		UpdateStatus(ctx context.Context, id uint64, status int64) error
 	}
 
@@ -48,6 +49,17 @@ func (m *customOrderModel) FindPendingOrders(ctx context.Context, limit int) ([]
 	var orders []*Order
 	query := fmt.Sprintf("select %s from %s where `status` = ? limit ?", orderRows, m.table)
 	err := m.conn.QueryRowsCtx(ctx, &orders, query, OrderStatusPending, limit)
+	if err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
+// FindProcessingOrders 查找处理中的订单
+func (m *customOrderModel) FindProcessingOrders(ctx context.Context, limit int) ([]*Order, error) {
+	var orders []*Order
+	query := fmt.Sprintf("select %s from %s where `status` = ? limit ?", orderRows, m.table)
+	err := m.conn.QueryRowsCtx(ctx, &orders, query, OrderStatusProcessing, limit)
 	if err != nil {
 		return nil, err
 	}

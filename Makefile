@@ -23,6 +23,10 @@ build:
 	echo "构建完成，请在 $(PHOTO_BIN_DIR) 目录下查看构建结果"
 
 
+sync-photos:
+	$(PHOTO_BIN_DIR)/photo-sync -f $(PHOTO_SERVER_DIR)/etc/photo-api.yaml
+
+
 run-sync:
 	$(PHOTO_BIN_DIR)/photo-sync -f $(PHOTO_SERVER_DIR)/etc/photo-api.yaml > $(PHOTO_BIN_DIR)/photo-sync.log 2>&1 &
 

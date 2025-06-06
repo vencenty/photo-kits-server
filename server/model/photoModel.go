@@ -26,6 +26,7 @@ type (
 		DeleteByOrderId(ctx context.Context, orderId uint64) error
 		FindByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error)
 		FindFailedPhotos(ctx context.Context, limit int) ([]*Photo, error)
+		FindFailedPhotosByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error)
 		UpdateStatus(ctx context.Context, id uint64, status int64, errMsg string) error
 	}
 
@@ -67,6 +68,17 @@ func (m *customPhotoModel) FindFailedPhotos(ctx context.Context, limit int) ([]*
 	var photos []*Photo
 	query := fmt.Sprintf("select %s from %s where `status` = ? limit ?", photoRows, m.table)
 	err := m.conn.QueryRowsCtx(ctx, &photos, query, PhotoStatusFailed, limit)
+	if err != nil {
+		return nil, err
+	}
+	return photos, nil
+}
+
+// FindFailedPhotosByOrderId 根据订单ID查找失败的照片
+func (m *customPhotoModel) FindFailedPhotosByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error) {
+	var photos []*Photo
+	query := fmt.Sprintf("select %s from %s where `order_id` = ? and `status` = ?", photoRows, m.table)
+	err := m.conn.QueryRowsCtx(ctx, &photos, query, orderId, PhotoStatusFailed)
 	if err != nil {
 		return nil, err
 	}

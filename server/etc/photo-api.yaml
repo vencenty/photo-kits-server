@@ -8,21 +8,21 @@ Database:
   Datasource: "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits?charset=utf8&parseTime=true"
 
 # 服务器数据
-#Minio:
-#  Schema: "https"
-#  Endpoint: "storage.vencenty.cc"
-#  AccessKey: "8glMRYHKdp4uWE5SfOUq"
-#  SecretKey: "VzIwRXMEk7A4ZjWUKiNvXW1xAEB6DmfsK20bv98e"
-#  UseSSL: true
-#  Bucket: "user-photos"
-
 Minio:
-  Schema: "http"
-  Endpoint: "fn.vencenty.cn:29000"
-  AccessKey: "sXocIjoLSIoxeRHQLpxo"
-  SecretKey: "kx5EeC5ysUtmJiFJ4XMIJfAECLKKmmQ8fBnQh6Ua"
-  UseSSL: false
+  Schema: "https"
+  Endpoint: "storage.vencenty.cc"
+  AccessKey: "8glMRYHKdp4uWE5SfOUq"
+  SecretKey: "VzIwRXMEk7A4ZjWUKiNvXW1xAEB6DmfsK20bv98e"
+  UseSSL: true
   Bucket: "user-photos"
+
+#Minio:
+#  Schema: "http"
+#  Endpoint: "fn.vencenty.cn:29000"
+#  AccessKey: "sXocIjoLSIoxeRHQLpxo"
+#  SecretKey: "kx5EeC5ysUtmJiFJ4XMIJfAECLKKmmQ8fBnQh6Ua"
+#  UseSSL: false
+#  Bucket: "user-photos"
 
 
 
