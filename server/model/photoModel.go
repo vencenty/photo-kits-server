@@ -24,6 +24,7 @@ type (
 		photoModel
 		withSession(session sqlx.Session) PhotoModel
 		DeleteByOrderId(ctx context.Context, orderId uint64) error
+		DeleteByOrderIds(ctx context.Context, orderIds []int64) error
 		FindByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error)
 		FindFailedPhotos(ctx context.Context, limit int) ([]*Photo, error)
 		FindFailedPhotosByOrderId(ctx context.Context, orderId uint64) ([]*Photo, error)
@@ -49,6 +50,34 @@ func (m *customPhotoModel) withSession(session sqlx.Session) PhotoModel {
 func (m *customPhotoModel) DeleteByOrderId(ctx context.Context, orderId uint64) error {
 	query := fmt.Sprintf("delete from %s where `order_id` = ?", m.table)
 	_, err := m.conn.ExecCtx(ctx, query, orderId)
+	return err
+}
+
+// DeleteByOrderIds 批量删除多个订单的照片
+func (m *customPhotoModel) DeleteByOrderIds(ctx context.Context, orderIds []int64) error {
+	if len(orderIds) == 0 {
+		return nil
+	}
+
+	// 构建IN子句的占位符
+	placeholders := make([]string, len(orderIds))
+	args := make([]interface{}, len(orderIds))
+	for i, id := range orderIds {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	inClause := ""
+	for i, placeholder := range placeholders {
+		if i == 0 {
+			inClause = placeholder
+		} else {
+			inClause += "," + placeholder
+		}
+	}
+
+	query := fmt.Sprintf("DELETE FROM %s WHERE `order_id` IN (%s)", m.table, inClause)
+	_, err := m.conn.ExecCtx(ctx, query, args...)
 	return err
 }
 

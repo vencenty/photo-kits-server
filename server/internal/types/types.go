@@ -3,6 +3,14 @@
 
 package types
 
+type OrderDeleteRequest struct {
+	OrderIds []int64 `json:"order_id"`
+}
+
+type OrderDeleteResponse struct {
+	Total int64 `json:"total"` // 删除了多少个
+}
+
 type OrderInfoRequest struct {
 	OrderSn string `json:"order_sn"`
 }
@@ -14,6 +22,39 @@ type OrderInfoResponse struct {
 	Status    int64   `json:"status"`
 	CreatedAt string  `json:"created_at"`
 	Photos    []Photo `json:"photos"`
+}
+
+type OrderItem struct {
+	OrderSn   string `json:"order_sn"`
+	Receiver  string `json:"receiver"`
+	Status    int64  `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+type OrderListRequest struct {
+	OrderSn   string `json:"order_sn,optional"`
+	Receiver  string `json:"receiver,optional"`
+	Remark    string `json:"remark,optional"`
+	Status    int64  `json:"status,optional"`
+	CreatedAt string `json:"created_at,optional"`
+	Page      int64  `json:"page,optional"`
+	PageSize  int64  `json:"page_size,optional"`
+}
+
+type OrderListResponse struct {
+	List     []OrderItem `json:"list"`
+	Total    int64       `json:"total"`
+	Page     int64       `json:"page"`
+	PageSize int64       `json:"page_size"`
+	Pages    int64       `json:"pages"`
+}
+
+type OrderUpdateStatusRequest struct {
+	OrderId int64 `json:"order_id"`
+	Status  int64 `json:"status"`
+}
+
+type OrderUpdateStatusResponse struct {
 }
 
 type Photo struct {
