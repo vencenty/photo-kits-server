@@ -90,18 +90,19 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	photos := make([]*model.Photo, 0)
 	for _, photo := range req.Photos {
 		// 添加每个URL对应的照片记录
-		for _, url := range photo.Urls {
-			if url == "" {
+		for _, metadata := range photo.Metadata {
+			if metadata.URL == "" {
 				continue
 			}
 
 			p := &model.Photo{
 				OrderId:   order.Id,
-				Url:       url,
-				ThumbUrl:  url, // 添加缩略图URL，暂时与原URL相同
+				Url:       metadata.URL,
+				ThumbUrl:  metadata.URL, // 添加缩略图URL，暂时与原URL相同
 				Spec:      photo.Spec,
 				Status:    model.PhotoStatusPending, // 设置为待处理状态
 				Error:     "",                       // 初始化错误信息为空
+				IsResized: metadata.IsResized,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}

@@ -58,20 +58,23 @@ func (l *OrderInfoLogic) OrderInfo(req *types.OrderInfoRequest) (resp *types.Ord
 	resp.CreatedAt = order.CreatedAt.Format("2006-01-02 15:04:05")
 
 	// 按照规格分组照片URL
-	photosBySpec := make(map[string][]string)
+	photosBySpec := make(map[string][]types.PhotoMetadata)
 	for _, p := range photos {
-		photosBySpec[p.Spec] = append(photosBySpec[p.Spec], p.Url)
+		photosBySpec[p.Spec] = append(photosBySpec[p.Spec], types.PhotoMetadata{
+			URL:       p.Url,
+			IsResized: p.IsResized,
+		})
 	}
 
 	// 转换为响应格式
 	resp.Photos = make([]types.Photo, 0, len(photosBySpec))
-	for spec, urls := range photosBySpec {
+	for spec, metadata := range photosBySpec {
 		photo := types.Photo{
-			Spec: spec,
-			Urls: urls,
+			Spec:     spec,
+			Metadata: metadata,
 		}
 		resp.Photos = append(resp.Photos, photo)
-		logx.Infof("规格 %s 的照片数量: %d", spec, len(urls))
+		logx.Infof("规格 %s 的照片数量: %d", spec, len(metadata))
 	}
 
 	logx.Infof("订单信息查询完成, order_sn: %s, 共 %d 种规格, 总照片数: %d",

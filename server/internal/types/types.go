@@ -17,8 +17,13 @@ type OrderInfoResponse struct {
 }
 
 type Photo struct {
-	Spec string   `json:"spec"`
-	Urls []string `json:"urls"`
+	Spec     string          `json:"spec"`
+	Metadata []PhotoMetadata `json:"metadata"`
+}
+
+type PhotoMetadata struct {
+	URL       string `json:"url"`
+	IsResized int64  `json:"is_resized"`
 }
 
 type SubmitRequest struct {

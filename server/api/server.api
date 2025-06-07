@@ -1,0 +1,81 @@
+syntax = "v1"
+
+type UploadResponse {
+	// 文件名
+	Filename string `json:"filename"`
+	// 文件大小
+	Size int64 `json:"size"`
+	// 文件sha1
+	Sha1 string `json:"sha1"`
+	// 文件完整路径
+	URL string `json:"url"`
+}
+
+type Photo {
+	Spec string `json:"spec"`
+	// 照片链接
+	Metadata []PhotoMetadata `json:"metadata"`
+}
+
+type PhotoMetadata {
+	// 图像地址
+	URL string `json:"url"`
+	// 是否已经调整过尺寸
+	IsResized int64 `json:"is_resized"`
+}
+
+type SubmitRequest {
+	// 订单号
+	OrderSn string `json:"order_sn"`
+	// 收件人
+	Receiver string `json:"receiver"`
+	// 备注信息
+	Remark string `json:"remark"`
+	// 照片列表
+	Photos []Photo `json:"photos"`
+}
+
+// 上传响应值
+type SubmitResponse {
+	// 总上传数量
+	Total int64 `json:"total"`
+}
+
+type OrderInfoRequest {
+	OrderSn string `json:"order_sn"`
+}
+
+type OrderInfoResponse {
+	// 订单号
+	OrderSn string `json:"order_sn"`
+	// 收件人信息
+	Receiver string `json:"receiver"`
+	// 备注信息
+	Remark string `json:"remark"`
+	// 订单状态
+	Status int64 `json:"status"`
+	//  订单创建时间
+	CreatedAt string `json:"created_at"`
+	// 照片列表
+	Photos []Photo `json:"photos"`
+}
+
+@server (
+	group: photo
+)
+service photo-api {
+	// 上传照片接口
+	@handler Upload
+	post /api/photo/upload returns (UploadResponse)
+	// 提交订单
+	@handler Submit
+	post /api/order/submit (SubmitRequest) returns (SubmitResponse)
+
+	// 订单数据
+	@handler OrderInfo
+	post /api/order/info (OrderInfoRequest) returns (OrderInfoResponse)
+
+	@handler Ping
+	get /api/ping returns (string)
+}
+
