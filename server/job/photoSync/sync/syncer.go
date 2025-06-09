@@ -196,11 +196,30 @@ func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) (successCount, fail
 		return 0, 0, nil
 	}
 
-	logx.Infof("找到 %d 张失败照片需要重试", len(failedPhotos))
+	// 先筛选出真正需要重试的照片
+	retryablePhotos := make([]*model.Photo, 0)
+	skippedCount := 0
 
-	// 按订单ID分组
-	photosByOrder := make(map[uint64][]*model.Photo)
 	for _, photo := range failedPhotos {
+		if s.shouldRetryFromError(photo.Error) {
+			retryablePhotos = append(retryablePhotos, photo)
+		} else {
+			skippedCount++
+			logx.Infof("跳过照片 %d (URL: %s)，错误不需要重试: %s", photo.Id, photo.Url, photo.Error)
+		}
+	}
+
+	logx.Infof("找到 %d 张失败照片，其中 %d 张需要重试，%d 张跳过",
+		len(failedPhotos), len(retryablePhotos), skippedCount)
+
+	if len(retryablePhotos) == 0 {
+		logx.Info("没有需要重试的照片")
+		return 0, 0, nil
+	}
+
+	// 按订单ID分组（只对需要重试的照片分组）
+	photosByOrder := make(map[uint64][]*model.Photo)
+	for _, photo := range retryablePhotos {
 		photosByOrder[photo.OrderId] = append(photosByOrder[photo.OrderId], photo)
 	}
 
@@ -313,6 +332,21 @@ func (s *PhotoSyncer) processPhotosInBatch(ctx context.Context, photos []*model.
 		}
 		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, URL: %s",
 			i+1, len(photos), photo.Id, spec, photo.Url)
+
+		// 如果照片状态为失败，检查是否应该重试（强制下载时跳过此检查）
+		if !forceDownload && photo.Status == model.PhotoStatusFailed {
+			// 只有状态为-2时才重试
+			if photo.Status != -2 {
+				logx.Infof("跳过照片 %d (URL: %s)，状态为%d不需要重试", photo.Id, photo.Url, photo.Status)
+				failCount++
+				continue
+			}
+		}
+
+		// 如果是强制下载且照片状态为失败，记录重新尝试的原因
+		if forceDownload && photo.Status == model.PhotoStatusFailed {
+			logx.Infof("强制重新下载照片 %d (URL: %s)，订单状态为未同步", photo.Id, photo.Url)
+		}
 
 		// 检查该规格的目录是否已创建
 		specDir, createErr := s.ensureSpecDirectory(orderDir, spec, specDirs)
@@ -637,31 +671,82 @@ func (s *PhotoSyncer) shouldRetry(err error, attempt int) bool {
 
 	errorStr := err.Error()
 
-	// 可重试的错误类型
-	retryableErrors := []string{
-		"context deadline exceeded",
-		"Client.Timeout exceeded",
-		"connection reset by peer",
-		"connection refused",
-		"no such host",
-		"network is unreachable",
-		"i/o timeout",
-		"EOF",
+	// 明确不应该重试的HTTP客户端错误 (4xx)
+	nonRetryableHTTPErrors := []string{
+		"HTTP响应状态码不是200: 400", // Bad Request
+		"HTTP响应状态码不是200: 401", // Unauthorized
+		"HTTP响应状态码不是200: 403", // Forbidden
+		"HTTP响应状态码不是200: 404", // Not Found
+		"HTTP响应状态码不是200: 405", // Method Not Allowed
+		"HTTP响应状态码不是200: 406", // Not Acceptable
+		"HTTP响应状态码不是200: 407", // Proxy Authentication Required
+		"HTTP响应状态码不是200: 408", // Request Timeout (虽然是408，但通常是客户端问题)
+		"HTTP响应状态码不是200: 409", // Conflict
+		"HTTP响应状态码不是200: 410", // Gone
+		"HTTP响应状态码不是200: 411", // Length Required
+		"HTTP响应状态码不是200: 412", // Precondition Failed
+		"HTTP响应状态码不是200: 413", // Payload Too Large
+		"HTTP响应状态码不是200: 414", // URI Too Long
+		"HTTP响应状态码不是200: 415", // Unsupported Media Type
+		"HTTP响应状态码不是200: 416", // Range Not Satisfiable
+		"HTTP响应状态码不是200: 417", // Expectation Failed
+		"HTTP响应状态码不是200: 418", // I'm a teapot
+		"HTTP响应状态码不是200: 421", // Misdirected Request
+		"HTTP响应状态码不是200: 422", // Unprocessable Entity
+		"HTTP响应状态码不是200: 423", // Locked
+		"HTTP响应状态码不是200: 424", // Failed Dependency
+		"HTTP响应状态码不是200: 425", // Too Early
+		"HTTP响应状态码不是200: 426", // Upgrade Required
+		"HTTP响应状态码不是200: 428", // Precondition Required
+		"HTTP响应状态码不是200: 431", // Request Header Fields Too Large
+		"HTTP响应状态码不是200: 451", // Unavailable For Legal Reasons
 	}
 
-	for _, retryableError := range retryableErrors {
+	// 检查是否为不应该重试的HTTP错误
+	for _, nonRetryableError := range nonRetryableHTTPErrors {
+		if strings.Contains(errorStr, nonRetryableError) {
+			logx.Infof("遇到HTTP客户端错误，不进行重试: %s", errorStr)
+			return false
+		}
+	}
+
+	// 应该重试的网络相关错误
+	retryableNetworkErrors := []string{
+		"context deadline exceeded",            // 上下文超时
+		"Client.Timeout exceeded",              // 客户端超时
+		"connection reset by peer",             // 连接被重置
+		"connection refused",                   // 连接被拒绝
+		"no such host",                         // 域名解析失败
+		"network is unreachable",               // 网络不可达
+		"i/o timeout",                          // I/O超时
+		"EOF",                                  // 连接意外关闭
+		"broken pipe",                          // 管道破坏
+		"connection timed out",                 // 连接超时
+		"temporary failure in name resolution", // DNS临时失败
+	}
+
+	// 检查是否为网络相关错误
+	for _, retryableError := range retryableNetworkErrors {
 		if strings.Contains(errorStr, retryableError) {
+			logx.Infof("遇到网络错误，将进行重试: %s", errorStr)
 			return true
 		}
 	}
 
-	// HTTP 5xx 错误通常是服务器临时问题，可以重试
+	// HTTP 5xx 服务器错误通常是临时问题，可以重试
 	if strings.Contains(errorStr, "HTTP响应状态码不是200: 5") {
+		logx.Infof("遇到服务器错误，将进行重试: %s", errorStr)
 		return true
 	}
 
-	// 其他错误不重试（如404, 403等）
+	// 其他未知错误不重试，记录日志便于排查
+	logx.Infof("遇到未知错误，不进行重试: %s", errorStr)
 	return false
+}
+
+// shouldRetryFromError 根据已保存的错误信息判断是否应该重试
+func (s *PhotoSyncer) shouldRetryFromError(errorMsg string) bool {
+	return false // 不再根据错误信息判断是否重试，由调用方根据status判断
 }
 
 // retryWorker 异步重试工作协程

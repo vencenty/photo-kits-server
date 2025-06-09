@@ -13,8 +13,10 @@ const (
 	PhotoStatusPending = 0
 	// PhotoStatusSuccess 照片下载成功
 	PhotoStatusSuccess = 1
-	// PhotoStatusFailed 照片下载失败
+	// PhotoStatusFailed 照片下载失败，不重试
 	PhotoStatusFailed = -1
+	// PhotoStatusFailedRetry 照片下载失败，可以重试
+	PhotoStatusFailedRetry = -2
 )
 
 type (
