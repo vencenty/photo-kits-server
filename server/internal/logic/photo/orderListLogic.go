@@ -64,6 +64,7 @@ func (l *OrderListLogic) OrderList(req *types.OrderListRequest) (resp *types.Ord
 	resp.List = make([]types.OrderItem, 0, len(orders))
 	for _, order := range orders {
 		item := types.OrderItem{
+			ID:        int64(order.Id),
 			OrderSn:   order.OrderSn,
 			Receiver:  order.Receiver,
 			Status:    order.Status,

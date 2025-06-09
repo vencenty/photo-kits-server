@@ -25,6 +25,7 @@ type OrderInfoResponse struct {
 }
 
 type OrderItem struct {
+	ID        int64  `json:"id"`
 	OrderSn   string `json:"order_sn"`
 	Receiver  string `json:"receiver"`
 	Status    int64  `json:"status"`
@@ -32,13 +33,13 @@ type OrderItem struct {
 }
 
 type OrderListRequest struct {
-	OrderSn   string `json:"order_sn,optional"`
-	Receiver  string `json:"receiver,optional"`
-	Remark    string `json:"remark,optional"`
-	Status    int64  `json:"status,optional"`
-	CreatedAt string `json:"created_at,optional"`
-	Page      int64  `json:"page,optional"`
-	PageSize  int64  `json:"page_size,optional"`
+	OrderSn   string `form:"order_sn,optional"`
+	Receiver  string `form:"receiver,optional"`
+	Remark    string `form:"remark,optional"`
+	Status    int64  `form:"status,optional"`
+	CreatedAt string `form:"created_at,optional"`
+	Page      int64  `form:"page,optional"`
+	PageSize  int64  `form:"page_size,optional"`
 }
 
 type OrderListResponse struct {

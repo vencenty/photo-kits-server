@@ -206,7 +206,7 @@ func (s *PhotoSyncer) retryFailedPhotos(ctx context.Context) (successCount, fail
 
 	// 处理每个订单的失败照片
 	for orderId, photos := range photosByOrder {
-		batchSuccessCount, batchFailCount, err := s.retryPhotosForOrder(ctx, orderId, photos, true)
+		batchSuccessCount, batchFailCount, err := s.retryPhotosForOrder(ctx, orderId, photos, false)
 		if err != nil {
 			logx.Errorf("重试订单 %d 失败照片时出错: %v", orderId, err)
 			continue
@@ -280,13 +280,13 @@ func (s *PhotoSyncer) retryPhotosForOrder(ctx context.Context, orderId uint64, p
 		return 0, 0, fmt.Errorf("查询订单信息失败, 订单ID: %d, 错误: %v", orderId, err)
 	}
 
-	// 创建目录结构
-	orderDir, err := s.createOrderDirectories(order)
+	// 创建目录结构（重试时也使用订单创建时间）
+	orderDir, err := s.createOrderDirectories(order, order.CreatedAt)
 	if err != nil {
 		return 0, 0, fmt.Errorf("为订单创建目录失败, 订单ID: %d, 错误: %v", orderId, err)
 	}
 
-	// 根据参数决定是否清空目录
+	// 只有在完全重新开始处理失败照片时才清空目录（通常不需要）
 	if cleanDirectory {
 		if err := s.cleanOrderDirectory(orderDir); err != nil {
 			logx.Errorf("清空订单目录失败: %v", err)
@@ -295,12 +295,13 @@ func (s *PhotoSyncer) retryPhotosForOrder(ctx context.Context, orderId uint64, p
 		logx.Infof("已清空订单目录: %s", orderDir)
 	}
 
-	// 使用统一的照片处理方法
-	return s.processPhotosInBatch(ctx, photos, orderDir, orderId)
+	// 使用统一的照片处理方法（重试时不强制下载）
+	return s.processPhotosInBatch(ctx, photos, orderDir, orderId, false)
 }
 
 // processPhotosInBatch 批量处理照片的通用方法
-func (s *PhotoSyncer) processPhotosInBatch(ctx context.Context, photos []*model.Photo, orderDir string, orderID uint64) (successCount, failCount int, err error) {
+// forceDownload: 是否强制下载所有照片（用于未同步订单）
+func (s *PhotoSyncer) processPhotosInBatch(ctx context.Context, photos []*model.Photo, orderDir string, orderID uint64, forceDownload bool) (successCount, failCount int, err error) {
 	// 按照照片的规格分组
 	specDirs := make(map[string]string)
 
@@ -323,6 +324,15 @@ func (s *PhotoSyncer) processPhotosInBatch(ctx context.Context, photos []*model.
 
 		// 下载照片到对应的目录
 		fileName := getCleanFileName(photo.Url)
+		destPath := filepath.Join(specDir, fileName)
+
+		// 检查文件是否已存在且照片状态为成功（非强制下载时）
+		if !forceDownload && photo.Status == model.PhotoStatusSuccess && s.fileExists(destPath) {
+			logx.Infof("照片已存在且状态为成功，跳过下载: ID: %d, 路径: %s", photo.Id, destPath)
+			successCount++
+			continue
+		}
+
 		logx.Infof("开始下载照片: ID: %d, 目标文件名: %s, 目标目录: %s",
 			photo.Id, fileName, specDir)
 
@@ -397,28 +407,25 @@ func (s *PhotoSyncer) checkAndCompleteOrder(ctx context.Context, orderId uint64)
 	return true
 }
 
-
-
 // createOrderDirectories 创建订单的目录结构，返回订单目录路径
-func (s *PhotoSyncer) createOrderDirectories(order *model.Order) (string, error) {
-	today := time.Now()
-
-	// 创建年份目录（如："2024"）
-	yearName := fmt.Sprintf("%d", today.Year())
+// baseTime: 用于创建目录结构的基准时间（订单创建时间或当前时间）
+func (s *PhotoSyncer) createOrderDirectories(order *model.Order, baseTime time.Time) (string, error) {
+	// 创建年份目录（如："2025"）
+	yearName := fmt.Sprintf("%d", baseTime.Year())
 	yearDir := filepath.Join(s.config.OutputPath, yearName)
 	if err := os.MkdirAll(yearDir, 0755); err != nil {
 		return "", fmt.Errorf("创建年份目录失败: %v", err)
 	}
 
-	// 创建月份目录（如："6月"）
-	monthName := fmt.Sprintf("%d月", int(today.Month()))
+	// 创建年月目录（如："202506"）
+	monthName := fmt.Sprintf("%d%02d", baseTime.Year(), int(baseTime.Month()))
 	monthDir := filepath.Join(yearDir, monthName)
 	if err := os.MkdirAll(monthDir, 0755); err != nil {
 		return "", fmt.Errorf("创建月份目录失败: %v", err)
 	}
 
-	// 创建以日期为名的目录（如："6-01"）
-	dateStr := today.Format("1-02")
+	// 创建年月日目录（如："20250601"）
+	dateStr := baseTime.Format("20060102")
 	dateDir := filepath.Join(monthDir, dateStr)
 	if err := os.MkdirAll(dateDir, 0755); err != nil {
 		return "", fmt.Errorf("创建日期目录失败: %v", err)
@@ -431,7 +438,7 @@ func (s *PhotoSyncer) createOrderDirectories(order *model.Order) (string, error)
 	}
 
 	// 输出详细的目录路径
-	logx.Infof("为订单 %s 创建目录: %s", order.OrderSn, orderDir)
+	logx.Infof("为订单 %s 创建目录: %s (基于时间: %s)", order.OrderSn, orderDir, baseTime.Format("2006-01-02 15:04:05"))
 
 	return orderDir, nil
 }
@@ -451,21 +458,39 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 
 	logx.Infof("订单 %d 有 %d 张照片需要处理", order.Id, len(photos))
 
+	// 所有订单都使用订单创建时间创建目录，确保文件按创建日期归档
+	baseTime := order.CreatedAt
+	var shouldCleanDirectory bool
+
+	if order.Status == model.OrderStatusPending {
+		// 未同步订单：需要清空目录重新同步（用户可能编辑了订单）
+		shouldCleanDirectory = true
+		logx.Infof("订单 %s 状态为未同步，使用订单创建时间创建目录并清空重新同步", order.OrderSn)
+	} else {
+		// 处理中订单：不清空目录，增量处理
+		shouldCleanDirectory = false
+		logx.Infof("订单 %s 状态为处理中，使用订单创建时间创建目录并增量处理", order.OrderSn)
+	}
+
+	logx.Infof("订单 %s 创建时间: %s，将同步到对应日期目录", order.OrderSn, baseTime.Format("2006-01-02 15:04:05"))
+
 	// 创建订单目录
-	orderDir, err := s.createOrderDirectories(order)
+	orderDir, err := s.createOrderDirectories(order, baseTime)
 	if err != nil {
 		return err
 	}
 
-	// 清空订单目录中的所有内容，确保每次同步都是最新的照片集合
-	if err := s.cleanOrderDirectory(orderDir); err != nil {
-		logx.Errorf("清空订单目录失败: %v", err)
-		return err
+	// 根据订单状态决定是否清空目录
+	if shouldCleanDirectory {
+		if err := s.cleanOrderDirectory(orderDir); err != nil {
+			logx.Errorf("清空订单目录失败: %v", err)
+			return err
+		}
+		logx.Infof("已清空订单目录: %s", orderDir)
 	}
-	logx.Infof("已清空订单目录: %s", orderDir)
 
 	// 使用统一的照片处理方法
-	successCount, failCount, err := s.processPhotosInBatch(ctx, photos, orderDir, order.Id)
+	successCount, failCount, err := s.processPhotosInBatch(ctx, photos, orderDir, order.Id, shouldCleanDirectory)
 	if err != nil {
 		return err
 	}
@@ -741,6 +766,16 @@ func getCleanFileName(fileUrl string) string {
 	}
 
 	return fileName
+}
+
+// fileExists 检查文件是否存在且不为空
+func (s *PhotoSyncer) fileExists(filePath string) bool {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	// 文件存在且大小大于0
+	return !info.IsDir() && info.Size() > 0
 }
 
 // cleanOrderDirectory 清空订单目录中的所有内容
