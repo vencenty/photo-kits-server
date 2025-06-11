@@ -14,7 +14,6 @@ import (
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
 	"strings"
-	"time"
 )
 
 type UploadLogic struct {
@@ -77,50 +76,11 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		return resp, err
 	}
 
-	// 在 Minio 中查找是否已存在相同 SHA1 的文件
-	// 首先尝试直接用 SHA1 作为文件名查找
-	objectName := fileSha1Sum + ext
-	found := false
-	
-	_, err = minioClient.StatObject(l.svcCtx.Config.Minio.Bucket, objectName, minio.StatObjectOptions{})
-	if err == nil {
-		// 对象已存在，直接返回
-		found = true
-		logx.Infof("文件已存在，SHA1: %s", fileSha1Sum)
-	} else {
-		// 如果直接查找不到，尝试在 bucket 中列出所有对象，查找包含此 SHA1 的文件
-		// 这种情况可能是因为之前上传时使用了带时间戳的文件名
-		doneCh := make(chan struct{})
-		defer close(doneCh)
-		
-		for objInfo := range minioClient.ListObjects(l.svcCtx.Config.Minio.Bucket, fileSha1Sum, true, doneCh) {
-			if objInfo.Err != nil {
-				continue
-			}
-			
-			// 如果找到的对象名包含该 SHA1，则认为文件已存在
-			if strings.Contains(objInfo.Key, fileSha1Sum) {
-				objectName = objInfo.Key
-				found = true
-				logx.Infof("找到已存在的文件，SHA1: %s, Key: %s", fileSha1Sum, objInfo.Key)
-				break
-			}
-		}
-	}
+	// 生成文件名：原始文件名_{sha1}.文件后缀
+	nameWithoutExt := strings.TrimSuffix(handler.Filename, ext)
+	objectName := fmt.Sprintf("%s_%s%s", nameWithoutExt, fileSha1Sum, ext)
 
-	// 如果文件已存在，直接返回 URL
-	if found {
-		return &types.UploadResponse{
-			Filename: handler.Filename,
-			Size:     handler.Size,
-			Sha1:     fileSha1Sum,
-			URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.Minio.Schema, l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, objectName),
-		}, nil
-	}
-
-	// 文件不存在，使用 SHA1 + 时间戳 + 扩展名作为文件名
-	timestamp := time.Now().UnixNano()
-	objectName = fmt.Sprintf("%s_%d%s", fileSha1Sum, timestamp, ext)
+	logx.Infof("上传文件: %s -> %s", handler.Filename, objectName)
 
 	// 写入 bucket
 	_, err = minioClient.PutObject(
