@@ -9,9 +9,7 @@ import (
 var _ OrderModel = (*customOrderModel)(nil)
 
 const (
-	// 部分失败
-	OrderStatusPartialFailed = -2
-	// 全部失败
+	// 失败（可能部分失败）
 	OrderStatusFailed = -1
 	// 订单待处理
 	OrderStatusPending = 0
@@ -30,6 +28,7 @@ type (
 		FindPendingOrders(ctx context.Context, limit int) ([]*Order, error)
 		FindProcessingOrders(ctx context.Context, limit int) ([]*Order, error)
 		UpdateStatus(ctx context.Context, id uint64, status int64) error
+		GetAndLockPendingOrder(ctx context.Context) (*Order, error)
 		FindOrdersWithPagination(ctx context.Context, orderSn, receiver, remark string, status int64, createdAt string, page, pageSize int64) ([]*Order, int64, error)
 		DeleteOrdersByIds(ctx context.Context, orderIds []int64) (int64, error)
 	}
@@ -77,6 +76,49 @@ func (m *customOrderModel) UpdateStatus(ctx context.Context, id uint64, status i
 	query := fmt.Sprintf("update %s set `status` = ? where `id` = ?", m.table)
 	_, err := m.conn.ExecCtx(ctx, query, status, id)
 	return err
+}
+
+// GetAndLockPendingOrder 原子性获取并锁定一个待处理订单
+func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, error) {
+	// 使用MySQL的原子更新操作来实现锁定
+	// 直接更新一行并返回更新前的信息
+	updateQuery := fmt.Sprintf(`
+		UPDATE %s 
+		SET status = ? 
+		WHERE id = (
+			SELECT id FROM (
+				SELECT id FROM %s 
+				WHERE status IN (?, ?) 
+				ORDER BY created_at ASC 
+				LIMIT 1
+			) AS tmp
+		)
+	`, m.table, m.table)
+
+	result, err := m.conn.ExecCtx(ctx, updateQuery, OrderStatusProcessing, OrderStatusPending, OrderStatusFailed)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查是否有行被更新
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected == 0 {
+		// 没有待处理的订单
+		return nil, fmt.Errorf("record not found")
+	}
+
+	// 查询刚刚更新的订单
+	findQuery := fmt.Sprintf("select %s from %s where status = ? order by updated_at desc limit 1", orderRows, m.table)
+	var order Order
+	err = m.conn.QueryRowCtx(ctx, &order, findQuery, OrderStatusProcessing)
+	if err != nil {
+		return nil, err
+	}
+
+	return &order, nil
 }
 
 // FindOrdersWithPagination 分页查询订单列表

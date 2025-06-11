@@ -35,7 +35,7 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 	}
 }
 
-// SyncPhotos 执行照片同步操作，获取status=0的订单并下载照片
+// SyncPhotos 执行照片同步操作，获取一条status=0或status=-1的订单并下载照片
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	logx.Info("开始同步照片...")
 	logx.Infof("输出根目录：%s", s.config.OutputPath)
@@ -46,42 +46,35 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return err
 	}
 
-	// 获取status=0的订单
-	pendingOrders, err := s.orderModel.FindPendingOrders(ctx, s.config.BatchSize)
+	// 获取一条待处理的订单(status=0或status=-1)并立即标记为处理中(status=1)
+	order, err := s.orderModel.GetAndLockPendingOrder(ctx)
 	if err != nil {
-		logx.Errorf("查询待处理订单失败: %v", err)
+		if err.Error() == "record not found" || err.Error() == "sql: no rows in result set" {
+			logx.Info("没有找到待处理的订单")
+			return nil
+		}
+		logx.Errorf("获取待处理订单失败: %v", err)
 		return err
 	}
 
-	if len(pendingOrders) == 0 {
+	if order == nil {
 		logx.Info("没有找到待处理的订单")
 		return nil
 	}
 
-	logx.Infof("找到 %d 个待处理订单", len(pendingOrders))
+	logx.Infof("===== 开始处理订单 =====")
+	logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s", order.Id, order.OrderSn, order.Receiver)
 
-	// 处理每个订单
-	for _, order := range pendingOrders {
-		logx.Infof("===== 开始处理订单 =====")
-		logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s", order.Id, order.OrderSn, order.Receiver)
+	// 处理订单照片
+	successCount, failCount := s.processOrderPhotos(ctx, order)
 
-		// 更新订单状态为处理中
-		if err := s.orderModel.UpdateStatus(ctx, order.Id, model.OrderStatusProcessing); err != nil {
-			logx.Errorf("更新订单状态失败, 订单ID: %d, 错误: %v", order.Id, err)
-			continue
-		}
-
-		// 处理订单照片
-		successCount, failCount := s.processOrderPhotos(ctx, order)
-
-		// 根据结果更新订单状态
-		if err := s.updateOrderStatusByResult(ctx, order.Id, order.OrderSn, successCount, failCount); err != nil {
-			logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
-		}
-
-		logx.Infof("订单处理完成, 订单ID: %d, 订单号: %s", order.Id, order.OrderSn)
-		logx.Infof("===== 订单处理结束 =====")
+	// 根据结果更新订单状态
+	if err := s.updateOrderStatusByResult(ctx, order.Id, order.OrderSn, successCount, failCount); err != nil {
+		logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
 	}
+
+	logx.Infof("订单处理完成, 订单ID: %d, 订单号: %s", order.Id, order.OrderSn)
+	logx.Infof("===== 订单处理结束 =====")
 
 	logx.Info("照片同步完成")
 	return nil
@@ -93,15 +86,11 @@ func (s *PhotoSyncer) updateOrderStatusByResult(ctx context.Context, orderId uin
 	var statusName string
 
 	if failCount == 0 {
-		// 全部成功
+		// 全部成功 - status = 2 (已完成)
 		newStatus = model.OrderStatusCompleted
 		statusName = "同步成功"
-	} else if successCount > 0 {
-		// 部分成功
-		newStatus = model.OrderStatusPartialFailed
-		statusName = "部分失败"
 	} else {
-		// 全部失败
+		// 有失败 - status = -1 (失败，下次会重新处理)
 		newStatus = model.OrderStatusFailed
 		statusName = "同步失败"
 	}
@@ -138,6 +127,16 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 		logx.Errorf("创建订单目录失败: %v", err)
 		return 0, len(photos) // 目录创建失败，所有照片都算失败
 	}
+
+	// 判断是否需要清空目录（订单原状态为0表示重新编辑过，需要清空）
+	// 注意：此时订单状态已经被更新为1(处理中)，需要通过其他方式判断是否需要清空
+	// 简化处理：总是清空目录，确保每次都是全新同步
+	logx.Infof("订单 %s 清空目录重新同步", order.OrderSn)
+	if err := s.cleanOrderDirectory(orderDir); err != nil {
+		logx.Errorf("清空订单目录失败: %v", err)
+		return 0, len(photos) // 清空失败，所有照片都算失败
+	}
+	logx.Infof("已清空订单目录: %s", orderDir)
 
 	// 下载所有照片
 	successCount, failCount = s.downloadAllPhotos(ctx, photos, orderDir)
@@ -379,4 +378,52 @@ func getCleanFileName(fileUrl string) string {
 func (s *PhotoSyncer) fileExists(filePath string) bool {
 	_, err := os.Stat(filePath)
 	return err == nil
+}
+
+// cleanOrderDirectory 清空订单目录中的所有内容
+func (s *PhotoSyncer) cleanOrderDirectory(orderDir string) error {
+	// 检查目录是否存在
+	if _, err := os.Stat(orderDir); os.IsNotExist(err) {
+		logx.Infof("订单目录不存在，无需清空: %s", orderDir)
+		return nil
+	}
+
+	logx.Infof("开始清空订单目录: %s", orderDir)
+
+	// 打开订单目录
+	dir, err := os.Open(orderDir)
+	if err != nil {
+		return fmt.Errorf("打开订单目录失败: %v", err)
+	}
+	defer dir.Close()
+
+	// 读取目录中的所有文件和子目录
+	files, err := dir.Readdir(0)
+	if err != nil {
+		return fmt.Errorf("读取目录内容失败: %v", err)
+	}
+
+	// 遍历所有文件和子目录，删除它们
+	for _, file := range files {
+		filePath := filepath.Join(orderDir, file.Name())
+
+		if file.IsDir() {
+			if err := os.RemoveAll(filePath); err != nil {
+				logx.Errorf("删除目录失败: %s, 错误: %v", filePath, err)
+				// 继续删除其他文件，不返回错误
+			} else {
+				logx.Infof("已删除目录: %s", filePath)
+			}
+		} else {
+			if err := os.Remove(filePath); err != nil {
+				logx.Errorf("删除文件失败: %s, 错误: %v", filePath, err)
+				// 继续删除其他文件，不返回错误
+			} else {
+				logx.Infof("已删除文件: %s", filePath)
+			}
+		}
+	}
+
+	logx.Infof("订单目录清空完成: %s", orderDir)
+	return nil
 }
