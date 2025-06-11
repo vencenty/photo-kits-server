@@ -9,6 +9,10 @@ import (
 var _ OrderModel = (*customOrderModel)(nil)
 
 const (
+	// 部分失败
+	OrderStatusPartialFailed = -2
+	// 全部失败
+	OrderStatusFailed = -1
 	// 订单待处理
 	OrderStatusPending = 0
 	// 订单已经锁定
