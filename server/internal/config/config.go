@@ -6,6 +6,7 @@ type Config struct {
 	rest.RestConf
 	Database Database `json:"database"`
 	Minio    Minio    `json:"minio"`
+	PushDeer PushDeer `json:"pushDeer"`
 }
 
 type Database struct {
@@ -19,4 +20,8 @@ type Minio struct {
 	SecretKey string `json:"secretKey"`
 	UseSSL    bool   `json:"useSSL"`
 	Bucket    string `json:"bucket"`
+}
+
+type PushDeer struct {
+	Keys []string `json:"keys"`
 }

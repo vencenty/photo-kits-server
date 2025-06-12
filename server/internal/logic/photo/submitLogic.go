@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	stdErrors "errors"
+	"fmt"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"github.com/zeromicro/x/errors"
+	"net/http"
+	"net/url"
 	"photo-kits-server/server/internal/svc"
 	"photo-kits-server/server/internal/types"
 	"photo-kits-server/server/model"
@@ -86,6 +89,10 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		}
 	}
 
+	// 统计每个规格的照片数量和调整状态
+	specCount := make(map[string]int64)
+	specResizedCount := make(map[string]int64)
+
 	// 把照片数据关联给订单
 	photos := make([]*model.Photo, 0)
 	for _, photo := range req.Photos {
@@ -108,6 +115,10 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 			}
 			photos = append(photos, p)
 			totalPhotos++
+			specCount[photo.Spec]++
+			if metadata.IsResized == 1 {
+				specResizedCount[photo.Spec]++
+			}
 		}
 	}
 
@@ -122,9 +133,98 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	logx.Infof("订单提交成功: orderSn=%s, receiverName=%s, 共%d张照片",
 		req.OrderSn, req.Receiver, totalPhotos)
 
+	// 发送 PushDeer 通知
+	isNewOrder := order.Id == uint64(orderId) // 如果orderId不为0，说明是新创建的订单
+	go l.sendPushDeerNotification(req, specCount, specResizedCount, totalPhotos, isNewOrder)
+
 	resp = new(types.SubmitResponse)
 	resp.Total = totalPhotos
 
 	// 如果订单已经存在，那么删除订单下所有关联的photo
 	return resp, nil
+}
+
+// 发送 PushDeer 通知
+func (l *SubmitLogic) sendPushDeerNotification(req *types.SubmitRequest, specCount map[string]int64, specResizedCount map[string]int64, totalPhotos int64, isNewOrder bool) {
+	// 从配置中获取 PushKeys
+	pushKeys := l.svcCtx.Config.PushDeer.Keys
+	if len(pushKeys) == 0 {
+		logx.Alert("PushDeer 配置为空，跳过推送通知")
+		return
+	}
+
+	// 根据是否为新订单设置不同的标题
+	var title string
+	if isNewOrder {
+		title = "## 📸 用户首次照片上传\n\n"
+	} else {
+		title = "## 📝 订单修改通知\n\n"
+	}
+
+	// 构造 Markdown 格式消息内容
+	message := title
+	message += fmt.Sprintf("**📋 订单号:** %s\n\n", req.OrderSn)
+	message += fmt.Sprintf("**👤 收货人:** %s\n\n", req.Receiver)
+	if req.Remark != "" {
+		message += fmt.Sprintf("**📝 订单备注:** %s\n\n", req.Remark)
+	}
+	message += "### 📊 照片详情\n\n"
+
+	// 添加每个规格的照片数量和调整状态
+	for spec, count := range specCount {
+		resizedCount := specResizedCount[spec]
+		var resizeStatus string
+
+		if resizedCount == count {
+			resizeStatus = "用户已全部调整"
+		} else if resizedCount > 0 {
+			resizeStatus = fmt.Sprintf("用户调整了%d张", resizedCount)
+		} else {
+			resizeStatus = "无调整"
+		}
+
+		message += fmt.Sprintf("- **%s:** %d张，尺寸：%s\n", spec, count, resizeStatus)
+	}
+
+	message += fmt.Sprintf("\n**📈 总计:** %d张照片\n\n", totalPhotos)
+	message += fmt.Sprintf("### 🔗 照片地址：https://photo-kits.vencenty.cc/upload?order_sn=%s", req.OrderSn)
+
+	// 向每个 PushKey 发送消息
+	for _, pushKey := range pushKeys {
+		go func(key string) {
+			err := l.sendToPushDeer(key, message)
+			if err != nil {
+				logx.Errorf("发送 PushDeer 通知失败: pushKey=%s, 错误: %v", key, err)
+			} else {
+				logx.Infof("PushDeer 通知发送成功: pushKey=%s, orderSn=%s", key, req.OrderSn)
+			}
+		}(pushKey)
+	}
+}
+
+// 发送消息到 PushDeer
+func (l *SubmitLogic) sendToPushDeer(pushKey, message string) error {
+	apiURL := "https://api2.pushdeer.com/message/push"
+
+	// URL 编码消息内容
+	params := url.Values{}
+	params.Add("pushkey", pushKey)
+	params.Add("text", "订单提醒")
+	params.Add("desp", message)
+	params.Add("type", "markdown")
+
+	fullURL := fmt.Sprintf("%s?%s", apiURL, params.Encode())
+
+	// 发送 GET 请求
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return fmt.Errorf("发送 HTTP 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("PushDeer API 返回错误状态码: %d", resp.StatusCode)
+	}
+
+	return nil
 }

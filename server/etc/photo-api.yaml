@@ -32,3 +32,12 @@ SyncConfig:
   Timeout: 3600                                     # 同步超时时间（秒）
   OutputPath: "/vol3/1000/Backup/user-photos"       # 照片输出路径
 #  OutputPath: "./data/backup"       # 照片输出路径
+
+WeChatPush:
+  SendKey: "SCT282582TeoQrefyavOBCni8FKZhkPZhl"
+
+# PushDeer 推送配置
+PushDeer:
+  Keys:
+    - "PDU35506Tpm3Gj2KqpOgec2TofZVx0QfjDVwhxiv8"
+    - "PDU35507TREfmMLCYbqCM3fH5CLQq197yoQduvf1g"
