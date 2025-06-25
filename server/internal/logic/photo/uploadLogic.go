@@ -100,6 +100,6 @@ func (l *UploadLogic) Upload() (resp *types.UploadResponse, err error) {
 		Filename: handler.Filename,
 		Size:     handler.Size,
 		Sha1:     fileSha1Sum,
-		URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.Minio.Schema, l.svcCtx.Config.Minio.Endpoint, l.svcCtx.Config.Minio.Bucket, objectName),
+		URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.AliyunCDN.Schema, l.svcCtx.Config.AliyunCDN.EndPoint, l.svcCtx.Config.Minio.Bucket, objectName),
 	}, nil
 }

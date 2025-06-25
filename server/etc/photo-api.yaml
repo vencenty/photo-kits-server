@@ -25,6 +25,9 @@ Minio:
   Bucket: "user-photos"
 
 
+AliyunCDN:
+  Schema: "https"
+  Endpoint: "edge.vencenty.cc"
 
 # 照片同步任务配置
 SyncConfig:

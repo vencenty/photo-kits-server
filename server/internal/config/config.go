@@ -4,9 +4,10 @@ import "github.com/zeromicro/go-zero/rest"
 
 type Config struct {
 	rest.RestConf
-	Database Database `json:"database"`
-	Minio    Minio    `json:"minio"`
-	PushDeer PushDeer `json:"pushDeer"`
+	Database  Database  `json:"database"`
+	Minio     Minio     `json:"minio"`
+	AliyunCDN AliyunCDN `json:"aliyunCDN"`
+	PushDeer  PushDeer  `json:"pushDeer"`
 }
 
 type Database struct {
@@ -20,6 +21,11 @@ type Minio struct {
 	SecretKey string `json:"secretKey"`
 	UseSSL    bool   `json:"useSSL"`
 	Bucket    string `json:"bucket"`
+}
+
+type AliyunCDN struct {
+	Schema   string `json:"schema"`
+	EndPoint string `json:"endPoint"`
 }
 
 type PushDeer struct {
