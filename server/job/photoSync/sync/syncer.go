@@ -161,7 +161,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			spec = "默认规格"
 		}
 		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, URL: %s",
-			i+1, len(photos), photo.Id, spec, photo.Url)
+			i+1, len(photos), photo.Id, spec, photo.OriginUrl)
 
 		// 确保规格目录存在
 		specDir, err := s.ensureSpecDirectory(orderDir, spec, specDirs)
@@ -178,7 +178,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		}
 
 		// 下载照片
-		fileName := getCleanFileName(photo.Url)
+		fileName := getCleanFileName(photo.OriginUrl)
 		// 生成唯一的文件名，避免重复
 		uniqueFileName := s.generateUniqueFileName(specDir, fileName, usedFileNames[specDir])
 		destPath := filepath.Join(specDir, uniqueFileName)
@@ -186,8 +186,8 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		logx.Infof("开始下载照片: ID: %d, 原始文件名: %s, 实际文件名: %s, 目标目录: %s",
 			photo.Id, fileName, uniqueFileName, specDir)
 
-		if err := s.downloadPhoto(ctx, photo.Url, destPath); err != nil {
-			logx.Errorf("照片下载失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.Url, err)
+		if err := s.downloadPhoto(ctx, photo.OriginUrl, destPath); err != nil {
+			logx.Errorf("照片下载失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.OriginUrl, err)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
 			continue

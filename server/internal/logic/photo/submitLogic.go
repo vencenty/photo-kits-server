@@ -102,10 +102,25 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 				continue
 			}
 
+			// CDN域名替换为源站域名
+			parsedURL, err := url.Parse(metadata.URL)
+			if err != nil {
+				logx.Errorf("解析URL失败: %v", err)
+				continue
+			}
+
+			originUrl := url.URL{
+				Scheme:   l.svcCtx.Config.Minio.Schema,
+				Host:     l.svcCtx.Config.Minio.Endpoint,
+				Path:     parsedURL.Path,
+				RawQuery: parsedURL.RawQuery,
+			}
+
 			p := &model.Photo{
 				OrderId:   order.Id,
 				Url:       metadata.URL,
 				ThumbUrl:  metadata.URL, // 添加缩略图URL，暂时与原URL相同
+				OriginUrl: originUrl.String(),
 				Spec:      photo.Spec,
 				Status:    model.PhotoStatusPending, // 设置为待处理状态
 				Error:     "",                       // 初始化错误信息为空
