@@ -13,8 +13,8 @@ import (
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
-	"photo-kits-server/server/job/photoSync/config"
-	"photo-kits-server/server/model"
+	"server/job/photoSync/config"
+	"server/model"
 )
 
 // PhotoSyncer 照片同步器

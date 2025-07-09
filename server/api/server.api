@@ -119,8 +119,24 @@ type OrderUpdateStatusRequest {
 
 type OrderUpdateStatusResponse {}
 
+// 管理员接口
 @server (
-	group: photo
+	group: admin
+)
+service photo-api {
+	@handler OrderList
+	get /admin/order/list (OrderListRequest) returns (OrderListResponse)
+
+	@handler DeleteOrder
+	post /admin/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
+
+	@handler UpdateOrderStatus
+	post /admin/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
+}
+
+// 客户端接口
+@server (
+	group: client
 )
 service photo-api {
 	// 上传照片接口
@@ -134,15 +150,6 @@ service photo-api {
 	// 订单数据
 	@handler OrderInfo
 	post /api/order/info (OrderInfoRequest) returns (OrderInfoResponse)
-
-	@handler OrderList
-	get /api/order/list (OrderListRequest) returns (OrderListResponse)
-
-	@handler DeleteOrder
-	post /api/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
-
-	@handler UpdateOrderStatus
-	post /api/order/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
 
 	@handler Ping
 	get /api/ping returns (string)

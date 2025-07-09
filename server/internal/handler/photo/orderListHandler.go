@@ -4,9 +4,9 @@ import (
 	"net/http"
 
 	"github.com/zeromicro/go-zero/rest/httpx"
-	"photo-kits-server/server/internal/logic/photo"
-	"photo-kits-server/server/internal/svc"
-	"photo-kits-server/server/internal/types"
+	"server/internal/logic/photo"
+	"server/internal/svc"
+	"server/internal/types"
 )
 
 func OrderListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {

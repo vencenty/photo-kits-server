@@ -1,4 +1,4 @@
-package photo
+package client
 
 import (
 	"bytes"
@@ -11,8 +11,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
-	"photo-kits-server/server/internal/svc"
-	"photo-kits-server/server/internal/types"
+	"server/internal/svc"
+	"server/internal/types"
 	"strings"
 )
 

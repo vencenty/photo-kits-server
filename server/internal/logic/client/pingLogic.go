@@ -1,10 +1,10 @@
-package photo
+package client
 
 import (
 	"context"
 
 	"github.com/zeromicro/go-zero/core/logx"
-	"photo-kits-server/server/internal/svc"
+	"server/internal/svc"
 )
 
 type PingLogic struct {

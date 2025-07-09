@@ -3,8 +3,8 @@ package svc
 import (
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"github.com/zeromicro/go-zero/rest"
-	"photo-kits-server/server/internal/config"
-	"photo-kits-server/server/internal/middleware"
+	"server/internal/config"
+	"server/internal/middleware"
 )
 
 type ServiceContext struct {

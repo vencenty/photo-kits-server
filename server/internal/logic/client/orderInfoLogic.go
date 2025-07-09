@@ -1,12 +1,12 @@
-package photo
+package client
 
 import (
 	"context"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/x/errors"
-	"photo-kits-server/server/internal/svc"
-	"photo-kits-server/server/internal/types"
-	"photo-kits-server/server/model"
+	"server/internal/svc"
+	"server/internal/types"
+	"server/model"
 )
 
 type OrderInfoLogic struct {

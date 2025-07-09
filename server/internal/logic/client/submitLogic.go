@@ -1,4 +1,4 @@
-package photo
+package client
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"github.com/zeromicro/x/errors"
 	"net/http"
 	"net/url"
-	"photo-kits-server/server/internal/svc"
-	"photo-kits-server/server/internal/types"
-	"photo-kits-server/server/model"
+	"server/internal/svc"
+	"server/internal/types"
+	"server/model"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"

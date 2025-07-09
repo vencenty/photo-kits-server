@@ -1,11 +1,11 @@
-package photo
+package admin
 
 import (
 	"context"
 
-	"photo-kits-server/server/internal/svc"
-	"photo-kits-server/server/internal/types"
-	"photo-kits-server/server/model"
+	"server/internal/svc"
+	"server/internal/types"
+	"server/model"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )

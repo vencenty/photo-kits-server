@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"photo-kits-server/server/internal/config"
-	"photo-kits-server/server/internal/handler"
-	"photo-kits-server/server/internal/svc"
+	"server/internal/config"
+	"server/internal/handler"
+	"server/internal/svc"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -34,7 +34,6 @@ func main() {
 	server := rest.MustNewServer(
 		c.RestConf,
 		rest.WithCors("*"),
-		rest.WithCorsHeaders("country,lang"),
 	)
 	defer server.Stop()
 

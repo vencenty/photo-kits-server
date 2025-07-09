@@ -3,8 +3,8 @@ package photo
 import (
 	xhttp "github.com/zeromicro/x/http"
 	"net/http"
-	"photo-kits-server/server/internal/logic/photo"
-	"photo-kits-server/server/internal/svc"
+	"server/internal/logic/photo"
+	"server/internal/svc"
 )
 
 func UploadHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
