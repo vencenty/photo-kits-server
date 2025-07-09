@@ -3,26 +3,15 @@ package client
 import (
 	"net/http"
 
-	"github.com/zeromicro/go-zero/rest/httpx"
 	"server/internal/logic/client"
 	"server/internal/svc"
 	"server/internal/types"
+	"server/internal/utils"
 )
 
 func SubmitHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req types.SubmitRequest
-		if err := httpx.Parse(r, &req); err != nil {
-			httpx.ErrorCtx(r.Context(), w, err)
-			return
-		}
-
+	return utils.WrapHandlerWithRequest(func(w http.ResponseWriter, r *http.Request, req interface{}) (interface{}, error) {
 		l := client.NewSubmitLogic(r.Context(), svcCtx)
-		resp, err := l.Submit(&req)
-		if err != nil {
-			httpx.ErrorCtx(r.Context(), w, err)
-		} else {
-			httpx.OkJsonCtx(r.Context(), w, resp)
-		}
-	}
+		return l.Submit(req.(*types.SubmitRequest))
+	}, &types.SubmitRequest{})
 }

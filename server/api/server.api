@@ -131,7 +131,12 @@ service photo-api {
 	post /admin/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
 
 	@handler UpdateOrderStatus
-	post /admin/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
+	post /admin/order/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
+
+		// 订单数据
+  @handler 订单详情
+  post /admin/order/info (OrderInfoRequest) returns (OrderInfoResponse)
+
 }
 
 // 客户端接口
