@@ -32,7 +32,7 @@ type SubmitRequest {
 	// 备注信息
 	Remark string `json:"remark"`
 	// 照片数量
-	PhotoCount int64 `json:"photo_count"`
+	PhotoCount int64 `json:"photo_count,optional"`
 	// 照片列表
 	Photos []Photo `json:"photos"`
 }

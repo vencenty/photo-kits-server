@@ -43,7 +43,7 @@ func (l *AdminOrderInfoLogic) AdminOrderInfo(req *types.OrderInfoRequest) (resp 
 			Spec: photo.Spec,
 			Metadata: []types.PhotoMetadata{
 				{
-					URL:       photo.Url,
+					URL:       photo.OriginUrl,
 					IsResized: photo.IsResized,
 				},
 			},
