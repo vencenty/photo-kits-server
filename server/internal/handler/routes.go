@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	admin "server/internal/handler/admin"
-	client "server/internal/handler/client"
+	api "server/internal/handler/api"
 	"server/internal/svc"
 
 	"github.com/zeromicro/go-zero/rest"
@@ -19,17 +19,22 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 			{
 				Method:  http.MethodPost,
 				Path:    "/admin/order/delete",
-				Handler: admin.DeleteOrderHandler(serverCtx),
+				Handler: admin.AdminOrderDeleteHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
+				Path:    "/admin/order/info",
+				Handler: admin.AdminOrderInfoHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodGet,
 				Path:    "/admin/order/list",
-				Handler: admin.OrderListHandler(serverCtx),
+				Handler: admin.AdminOrderListHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
-				Path:    "/admin/update_status",
-				Handler: admin.UpdateOrderStatusHandler(serverCtx),
+				Path:    "/admin/order/update_status",
+				Handler: admin.AdminOrderUpdateStatusHandler(serverCtx),
 			},
 		},
 	)
@@ -39,22 +44,22 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/order/info",
-				Handler: client.OrderInfoHandler(serverCtx),
+				Handler: api.OrderInfoHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/order/submit",
-				Handler: client.SubmitHandler(serverCtx),
+				Handler: api.SubmitHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/photo/upload",
-				Handler: client.UploadHandler(serverCtx),
+				Handler: api.UploadHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodGet,
 				Path:    "/api/ping",
-				Handler: client.PingHandler(serverCtx),
+				Handler: api.PingHandler(serverCtx),
 			},
 		},
 	)

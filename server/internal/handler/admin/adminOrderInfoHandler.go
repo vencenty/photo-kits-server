@@ -9,9 +9,9 @@ import (
 	"server/internal/utils"
 )
 
-func UpdateOrderStatusHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+func AdminOrderInfoHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return utils.WrapHandlerWithRequest(func(w http.ResponseWriter, r *http.Request, req interface{}) (interface{}, error) {
-		l := admin.NewUpdateOrderStatusLogic(r.Context(), svcCtx)
-		return l.UpdateOrderStatus(req.(*types.OrderUpdateStatusRequest))
-	}, &types.OrderUpdateStatusRequest{})
+		l := admin.NewAdminOrderInfoLogic(r.Context(), svcCtx)
+		return l.AdminOrderInfo(req.(*types.OrderInfoRequest))
+	}, &types.OrderInfoRequest{})
 }

@@ -9,9 +9,9 @@ import (
 	"server/internal/utils"
 )
 
-func DeleteOrderHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+func AdminOrderDeleteHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 	return utils.WrapHandlerWithRequest(func(w http.ResponseWriter, r *http.Request, req interface{}) (interface{}, error) {
-		l := admin.NewDeleteOrderLogic(r.Context(), svcCtx)
-		return l.DeleteOrder(req.(*types.OrderDeleteRequest))
+		l := admin.NewAdminOrderDeleteLogic(r.Context(), svcCtx)
+		return l.AdminOrderDelete(req.(*types.OrderDeleteRequest))
 	}, &types.OrderDeleteRequest{})
 }
