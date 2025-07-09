@@ -2,8 +2,6 @@ module server
 
 go 1.21
 
-toolchain go1.23.4
-
 require (
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/zeromicro/go-zero v1.6.6

@@ -36,18 +36,24 @@ func (l *AdminOrderInfoLogic) AdminOrderInfo(req *types.OrderInfoRequest) (resp 
 		return nil, err
 	}
 
-	// 构建照片数据
-	photoList := make([]types.Photo, 0, len(photos))
+	// 按照规格分组照片URL
+	photosBySpec := make(map[string][]types.PhotoMetadata)
 	for _, photo := range photos {
-		photoList = append(photoList, types.Photo{
-			Spec: photo.Spec,
-			Metadata: []types.PhotoMetadata{
-				{
-					URL:       photo.OriginUrl,
-					IsResized: photo.IsResized,
-				},
-			},
+		photosBySpec[photo.Spec] = append(photosBySpec[photo.Spec], types.PhotoMetadata{
+			URL:       photo.OriginUrl,
+			IsResized: photo.IsResized,
 		})
+	}
+
+	// 转换为响应格式
+	photoList := make([]types.Photo, 0, len(photosBySpec))
+	for spec, metadata := range photosBySpec {
+		photo := types.Photo{
+			Spec:     spec,
+			Metadata: metadata,
+		}
+		photoList = append(photoList, photo)
+		logx.Infof("规格 %s 的照片数量: %d", spec, len(metadata))
 	}
 
 	return &types.OrderInfoResponse{
