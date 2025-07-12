@@ -9,6 +9,7 @@ gen-model:
 	cd $(PHOTO_SERVER_DIR) && \
 	goctl model mysql datasource --url "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits" -d ./model -t photo --style=goZero && \
 	goctl model mysql datasource --url "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits" -d ./model -t order --style=goZero && \
+	goctl model mysql datasource --url "root:UvbGrsVVaKDDzOEF@tcp(vencenty.cc:53824)/photo-kits" -d ./model -t admin --style=goZero && \
 	echo "数据库模型 model 生成结束"
 
 gen-api:
