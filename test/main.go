@@ -10,7 +10,9 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -21,7 +23,7 @@ type PhotoClassifier struct {
 }
 
 // 支持的图片格式
-var supportedFormats = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp"}
+var supportedFormats = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic"}
 
 // 分类文件夹映射
 var aspectRatioFolders = map[string]string{
@@ -45,6 +47,11 @@ func isImageFile(filename string) bool {
 
 // 获取图片尺寸
 func getImageDimensions(filePath string) (width, height int, err error) {
+	// 检查是否为HEIC文件
+	if strings.ToLower(filepath.Ext(filePath)) == ".heic" {
+		return getHeicDimensions(filePath)
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, 0, err
@@ -57,6 +64,66 @@ func getImageDimensions(filePath string) (width, height int, err error) {
 	}
 
 	return config.Width, config.Height, nil
+}
+
+// 获取HEIC文件尺寸（使用系统命令）
+func getHeicDimensions(filePath string) (width, height int, err error) {
+	// 创建临时JPG文件来获取尺寸
+	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("temp_%d.jpg", os.Getpid()))
+	defer os.Remove(tempFile)
+
+	// 转换HEIC为临时JPG
+	if err := convertHeicToJpgWithSips(filePath, tempFile); err != nil {
+		return 0, 0, fmt.Errorf("转换HEIC失败: %v", err)
+	}
+
+	// 从临时JPG文件获取尺寸
+	file, err := os.Open(tempFile)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+
+	config, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return config.Width, config.Height, nil
+}
+
+// 使用系统命令将HEIC转换为JPG
+func convertHeicToJpgWithSips(heicPath, jpgPath string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS 使用 sips 命令
+		cmd := exec.Command("sips", "-s", "format", "jpeg", heicPath, "--out", jpgPath)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("sips转换失败: %v", err)
+		}
+	case "linux":
+		// Linux 可以尝试使用 ImageMagick 的 convert 命令
+		cmd := exec.Command("convert", heicPath, jpgPath)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("convert转换失败: %v (请确保安装了ImageMagick)", err)
+		}
+	case "windows":
+		// Windows 系统提示用户手动转换
+		return fmt.Errorf("Windows系统不支持自动HEIC转换，请手动转换HEIC文件为JPG后再运行")
+	default:
+		return fmt.Errorf("不支持的操作系统: %s", runtime.GOOS)
+	}
+
+	return nil
+}
+
+// 将HEIC文件转换为JPG
+func convertHeicToJpg(heicPath, jpgPath string) error {
+	if err := convertHeicToJpgWithSips(heicPath, jpgPath); err != nil {
+		return err
+	}
+	fmt.Printf("HEIC转JPG成功: %s -> %s\n", heicPath, jpgPath)
+	return nil
 }
 
 // 计算长宽比并分类
@@ -159,16 +226,33 @@ func (pc *PhotoClassifier) ClassifyPhotos() error {
 		category := classifyAspectRatio(width, height)
 		stats[category]++
 
-		// 复制到对应文件夹
-		dstDir := filepath.Join(pc.OutputDir, aspectRatioFolders[category])
-		dstPath := filepath.Join(dstDir, filename)
-
-		if err := copyFile(srcPath, dstPath); err != nil {
-			log.Printf("复制文件失败 %s: %v", filename, err)
-			continue
+		// 确定最终文件名和路径
+		var finalFilename string
+		if strings.ToLower(filepath.Ext(filename)) == ".heic" {
+			// HEIC文件转换为JPG格式保存
+			finalFilename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
+		} else {
+			finalFilename = filename
 		}
 
-		fmt.Printf("分类: %s -> %s (尺寸: %dx%d)\n", filename, category, width, height)
+		// 复制到对应文件夹
+		dstDir := filepath.Join(pc.OutputDir, aspectRatioFolders[category])
+		dstPath := filepath.Join(dstDir, finalFilename)
+
+		// 处理HEIC文件：转换为JPG后保存
+		if strings.ToLower(filepath.Ext(filename)) == ".heic" {
+			if err := convertHeicToJpg(srcPath, dstPath); err != nil {
+				log.Printf("HEIC转JPG失败 %s: %v", filename, err)
+				continue
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				log.Printf("复制文件失败 %s: %v", finalFilename, err)
+				continue
+			}
+		}
+
+		fmt.Printf("分类: %s -> %s (尺寸: %dx%d)\n", finalFilename, category, width, height)
 	}
 
 	// 输出统计信息
