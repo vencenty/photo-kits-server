@@ -18,7 +18,7 @@ func (c *CorsMiddleware) Handle(next http.HandlerFunc) http.HandlerFunc {
 		// 设置允许的源
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		// 设置允许的请求头类型
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,country")
 		// 设置允许的请求方法
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 

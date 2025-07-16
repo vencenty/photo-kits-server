@@ -18,22 +18,27 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 		[]rest.Route{
 			{
 				Method:  http.MethodPost,
-				Path:    "/admin/order/delete",
+				Path:    "/api/admin/login",
+				Handler: admin.AdminLoginHandler(serverCtx),
+			},
+			{
+				Method:  http.MethodPost,
+				Path:    "/api/admin/order/delete",
 				Handler: admin.AdminOrderDeleteHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
-				Path:    "/admin/order/info",
+				Path:    "/api/admin/order/info",
 				Handler: admin.AdminOrderInfoHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodGet,
-				Path:    "/admin/order/list",
+				Path:    "/api/admin/order/list",
 				Handler: admin.AdminOrderListHandler(serverCtx),
 			},
 			{
 				Method:  http.MethodPost,
-				Path:    "/admin/order/update_status",
+				Path:    "/api/admin/order/update_status",
 				Handler: admin.AdminOrderUpdateStatusHandler(serverCtx),
 			},
 		},

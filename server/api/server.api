@@ -121,23 +121,53 @@ type OrderUpdateStatusResponse {
 	Total int64 `json:"total"` // 更新了多少个
 }
 
+// 管理员登录请求
+type AdminLoginRequest {
+	// 邮箱或手机号
+	Account string `json:"account"`
+	// 密码
+	Password string `json:"password"`
+}
+
+// 管理员登录响应
+type AdminLoginResponse {
+	// 管理员ID
+	Id int64 `json:"id"`
+	// 昵称
+	Nickname string `json:"nickname,optional"`
+	// 头像URL
+	AvatarUrl string `json:"avatar_url,optional"`
+	// 邮箱
+	Email string `json:"email,optional"`
+	// 手机号
+	Mobile string `json:"mobile,optional"`
+	// 创建时间
+	CreatedAt string `json:"created_at,optional"`
+	// 更新时间
+	UpdatedAt string `json:"updated_at,optional"`
+}
+
 // 管理员接口
 @server (
 	group: admin
 )
 service photo-api {
+	// 管理员登录
+	@handler AdminLogin
+	post /api/admin/login (AdminLoginRequest) returns (AdminLoginResponse)
+
 	@handler AdminOrderList
-	get /admin/order/list (OrderListRequest) returns (OrderListResponse)
+	get /api/admin/order/list (OrderListRequest) returns (OrderListResponse)
 
 	@handler AdminOrderDelete
-	post /admin/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
+	post /api/admin/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
 
 	@handler AdminOrderUpdateStatus
-	post /admin/order/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
+	post /api/admin/order/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
 
 	// 订单详情
 	@handler AdminOrderInfo
-	post /admin/order/info (OrderInfoRequest) returns (OrderInfoResponse)
+	post /api/admin/order/info (OrderInfoRequest) returns (OrderInfoResponse)
 }
 
 // 客户端接口

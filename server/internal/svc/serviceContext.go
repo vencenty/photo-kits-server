@@ -14,6 +14,7 @@ type ServiceContext struct {
 	CorsMiddleware rest.Middleware
 	OrderModel     model.OrderModel
 	PhotoModel     model.PhotoModel
+	AdminModel     model.AdminModel
 }
 
 func NewServiceContext(c config.Config) *ServiceContext {
@@ -24,5 +25,6 @@ func NewServiceContext(c config.Config) *ServiceContext {
 		CorsMiddleware: middleware.NewCorsMiddleware().Handle,
 		OrderModel:     model.NewOrderModel(conn),
 		PhotoModel:     model.NewPhotoModel(conn),
+		AdminModel:     model.NewAdminModel(conn),
 	}
 }
