@@ -3,6 +3,8 @@ module server
 go 1.21
 
 require (
+	github.com/golang-jwt/jwt/v4 v4.5.2
+	github.com/jinzhu/copier v0.4.0
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/zeromicro/go-zero v1.6.6
 	github.com/zeromicro/x v0.0.0-20240408115609-8224c482b07e
@@ -19,7 +21,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.9.0 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect

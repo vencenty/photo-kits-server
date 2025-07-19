@@ -21,6 +21,16 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Path:    "/api/admin/login",
 				Handler: admin.AdminLoginHandler(serverCtx),
 			},
+		},
+	)
+
+	server.AddRoutes(
+		[]rest.Route{
+			{
+				Method:  http.MethodPost,
+				Path:    "/api/admin/info",
+				Handler: admin.AdminInfoHandler(serverCtx),
+			},
 			{
 				Method:  http.MethodPost,
 				Path:    "/api/admin/order/delete",
@@ -42,6 +52,7 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Handler: admin.AdminOrderUpdateStatusHandler(serverCtx),
 			},
 		},
+		rest.WithJwt(serverCtx.Config.Auth.AccessSecret),
 	)
 
 	server.AddRoutes(

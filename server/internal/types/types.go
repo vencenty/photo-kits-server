@@ -3,12 +3,10 @@
 
 package types
 
-type AdminLoginRequest struct {
-	Account  string `json:"account"`
-	Password string `json:"password"`
+type AdminInfoRequest struct {
 }
 
-type AdminLoginResponse struct {
+type AdminInfoResponse struct {
 	Id        int64  `json:"id"`
 	Nickname  string `json:"nickname,optional"`
 	AvatarUrl string `json:"avatar_url,optional"`
@@ -16,6 +14,15 @@ type AdminLoginResponse struct {
 	Mobile    string `json:"mobile,optional"`
 	CreatedAt string `json:"created_at,optional"`
 	UpdatedAt string `json:"updated_at,optional"`
+}
+
+type AdminLoginRequest struct {
+	Account  string `json:"account"`
+	Password string `json:"password"`
+}
+
+type AdminLoginResponse struct {
+	Token string `json:"token"`
 }
 
 type OrderDeleteRequest struct {

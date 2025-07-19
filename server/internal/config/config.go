@@ -8,6 +8,11 @@ type Config struct {
 	Minio     Minio     `json:"minio"`
 	AliyunCDN AliyunCDN `json:"aliyunCDN"`
 	PushDeer  PushDeer  `json:"pushDeer"`
+	Auth      Auth      `json:"auth"`
+}
+type Auth struct { // JWT 认证需要的密钥和过期时间配置
+	AccessSecret string
+	AccessExpire int64
 }
 
 type Database struct {

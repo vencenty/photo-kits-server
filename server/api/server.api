@@ -129,8 +129,12 @@ type AdminLoginRequest {
 	Password string `json:"password"`
 }
 
-// 管理员登录响应
 type AdminLoginResponse {
+	Token string `json:"token"`
+}
+
+// 管理员登录响应
+type AdminInfoResponse {
 	// 管理员ID
 	Id int64 `json:"id"`
 	// 昵称
@@ -147,21 +151,38 @@ type AdminLoginResponse {
 	UpdatedAt string `json:"updated_at,optional"`
 }
 
+type AdminInfoRequest {}
+
 // 管理员接口
 @server (
 	group: admin
 )
 service photo-api {
-	// 管理员登录
+	// 管理员登陆接口
 	@handler AdminLogin
 	post /api/admin/login (AdminLoginRequest) returns (AdminLoginResponse)
+}
 
+@server (
+	group: admin
+	jwt:   Auth // 开启 jwt 认证
+)
+service photo-api {
+	// 管理员登录
+	//@handler AdminLogin
+	//post /api/admin/login (AdminInfoRequest) returns (AdminInfoResponse)
+	@handler AdminInfo
+	post /api/admin/info (AdminInfoRequest) returns (AdminInfoResponse)
+
+	// 管理员订单列表
 	@handler AdminOrderList
 	get /api/admin/order/list (OrderListRequest) returns (OrderListResponse)
 
+	// 删除订单
 	@handler AdminOrderDelete
 	post /api/admin/order/delete (OrderDeleteRequest) returns (OrderDeleteResponse)
 
+	// 更新订单状态
 	@handler AdminOrderUpdateStatus
 	post /api/admin/order/update_status (OrderUpdateStatusRequest) returns (OrderUpdateStatusResponse)
 

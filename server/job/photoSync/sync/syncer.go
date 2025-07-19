@@ -3,6 +3,10 @@ package sync
 import (
 	"context"
 	"fmt"
+	"image"
+	_ "image/gif"  // 支持GIF格式
+	_ "image/jpeg" // 支持JPEG格式
+	_ "image/png"  // 支持PNG格式
 	"io"
 	"net/http"
 	"net/url"
@@ -147,6 +151,70 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 	return successCount, failCount
 }
 
+// AspectRatio 宽高比结构
+type AspectRatio struct {
+	Name      string
+	Ratio     float64
+	Tolerance float64
+}
+
+// 预定义的标准宽高比（只保留常用比例）
+var standardAspectRatios = []AspectRatio{
+	{Name: "1:1", Ratio: 1.0, Tolerance: 0.02},
+	{Name: "4:3", Ratio: 4.0 / 3.0, Tolerance: 0.02},
+	{Name: "16:9", Ratio: 16.0 / 9.0, Tolerance: 0.02},
+	{Name: "3:2", Ratio: 3.0 / 2.0, Tolerance: 0.02},
+}
+
+// getImageDimensions 获取图片的宽高
+func (s *PhotoSyncer) getImageDimensions(imagePath string) (width, height int, err error) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("打开图片文件失败: %v", err)
+	}
+	defer file.Close()
+
+	img, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return 0, 0, fmt.Errorf("解码图片配置失败: %v", err)
+	}
+
+	return img.Width, img.Height, nil
+}
+
+// calculateAspectRatio 计算宽高比
+func calculateAspectRatio(width, height int) float64 {
+	if height == 0 {
+		return 0
+	}
+	return float64(width) / float64(height)
+}
+
+// getAspectRatioCategory 根据宽高比获取分类名称
+func getAspectRatioCategory(ratio float64) string {
+	// 标准化比例（取绝对值，因为3:4和4:3是同一个比例）
+	standardRatio := ratio
+	if ratio < 1 {
+		standardRatio = 1 / ratio
+	}
+
+	// 查找匹配的标准比例
+	for _, ar := range standardAspectRatios {
+		if abs(standardRatio-ar.Ratio) <= ar.Tolerance {
+			return ar.Name
+		}
+	}
+	return "other"
+}
+
+// abs 计算绝对值
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // downloadAllPhotos 下载订单的所有照片
 func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Photo, orderDir string) (successCount, failCount int) {
 	// 按照照片的规格分组创建目录
@@ -172,31 +240,71 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			continue
 		}
 
-		// 初始化该规格目录的文件名记录
-		if usedFileNames[specDir] == nil {
-			usedFileNames[specDir] = make(map[string]bool)
-		}
+		// 下载照片到临时位置以获取尺寸信息
+		tempFileName := fmt.Sprintf("temp_%d_%s", photo.Id, getCleanFileName(photo.OriginUrl))
+		tempPath := filepath.Join(specDir, tempFileName)
 
-		// 下载照片
-		fileName := getCleanFileName(photo.OriginUrl)
-		// 生成唯一的文件名，避免重复
-		uniqueFileName := s.generateUniqueFileName(specDir, fileName, usedFileNames[specDir])
-		destPath := filepath.Join(specDir, uniqueFileName)
+		logx.Infof("开始下载照片到临时位置: ID: %d, 临时路径: %s", photo.Id, tempPath)
 
-		logx.Infof("开始下载照片: ID: %d, 原始文件名: %s, 实际文件名: %s, 目标目录: %s",
-			photo.Id, fileName, uniqueFileName, specDir)
-
-		if err := s.downloadPhoto(ctx, photo.OriginUrl, destPath); err != nil {
+		if err := s.downloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
 			logx.Errorf("照片下载失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.OriginUrl, err)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
 			continue
 		}
 
-		// 标记文件名已使用
-		usedFileNames[specDir][uniqueFileName] = true
+		// 获取图片尺寸
+		width, height, err := s.getImageDimensions(tempPath)
+		if err != nil {
+			logx.Errorf("获取图片尺寸失败, 照片ID: %d, 错误: %v", photo.Id, err)
+			// 删除临时文件
+			os.Remove(tempPath)
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
+			failCount++
+			continue
+		}
 
-		logx.Infof("照片下载成功: ID: %d, 保存路径: %s", photo.Id, destPath)
+		// 计算宽高比并确定分类
+		ratio := calculateAspectRatio(width, height)
+		aspectCategory := getAspectRatioCategory(ratio)
+
+		logx.Infof("照片尺寸: %dx%d, 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
+
+		// 创建比例分类目录
+		aspectDir := filepath.Join(specDir, aspectCategory)
+		if err := os.MkdirAll(aspectDir, 0755); err != nil {
+			logx.Errorf("创建比例分类目录失败: %v", err)
+			os.Remove(tempPath)
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
+			failCount++
+			continue
+		}
+
+		// 初始化该比例目录的文件名记录
+		aspectKey := fmt.Sprintf("%s/%s", specDir, aspectCategory)
+		if usedFileNames[aspectKey] == nil {
+			usedFileNames[aspectKey] = make(map[string]bool)
+		}
+
+		// 生成最终文件名和路径
+		fileName := getCleanFileName(photo.OriginUrl)
+		uniqueFileName := s.generateUniqueFileName(aspectDir, fileName, usedFileNames[aspectKey])
+		finalPath := filepath.Join(aspectDir, uniqueFileName)
+
+		// 移动临时文件到最终位置
+		if err := os.Rename(tempPath, finalPath); err != nil {
+			logx.Errorf("移动文件到最终位置失败: %v", err)
+			os.Remove(tempPath)
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
+			failCount++
+			continue
+		}
+
+		// 标记文件名已使用
+		usedFileNames[aspectKey][uniqueFileName] = true
+
+		logx.Infof("照片下载成功: ID: %d, 保存路径: %s, 尺寸: %dx%d, 比例: %s",
+			photo.Id, finalPath, width, height, aspectCategory)
 		s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusSuccess, "")
 		successCount++
 	}
