@@ -37,8 +37,8 @@ AliyunCDN:
 SyncConfig:
   BatchSize: 100                                    # 每批处理的订单数量
   Timeout: 3600                                     # 同步超时时间（秒）
-  #OutputPath: "/vol3/1000/Backup/user-photos"       # 照片输出路径
-  OutputPath: "./data/backup"       # 照片输出路径
+  OutputPath: "/vol3/1000/Backup/user-photos"       # 照片输出路径
+  #OutputPath: "./data/backup"       # 照片输出路径
 
 WeChatPush:
   SendKey: "SCT282582TeoQrefyavOBCni8FKZhkPZhl"
