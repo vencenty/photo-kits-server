@@ -160,10 +160,10 @@ type AspectRatio struct {
 
 // 预定义的标准宽高比（只保留常用比例）
 var standardAspectRatios = []AspectRatio{
-	{Name: "1:1", Ratio: 1.0, Tolerance: 0.02},
-	{Name: "4:3", Ratio: 4.0 / 3.0, Tolerance: 0.02},
-	{Name: "16:9", Ratio: 16.0 / 9.0, Tolerance: 0.02},
-	{Name: "3:2", Ratio: 3.0 / 2.0, Tolerance: 0.02},
+	{Name: "1_1", Ratio: 1.0, Tolerance: 0.02},
+	{Name: "4_3", Ratio: 4.0 / 3.0, Tolerance: 0.02},
+	{Name: "16_9", Ratio: 16.0 / 9.0, Tolerance: 0.02},
+	{Name: "3_2", Ratio: 3.0 / 2.0, Tolerance: 0.02},
 }
 
 // getImageDimensions 获取图片的宽高
