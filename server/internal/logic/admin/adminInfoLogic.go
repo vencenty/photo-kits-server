@@ -26,6 +26,7 @@ func NewAdminInfoLogic(ctx context.Context, svcCtx *svc.ServiceContext) *AdminIn
 }
 
 func (l *AdminInfoLogic) AdminInfo(req *types.AdminInfoRequest) (resp *types.AdminInfoResponse, err error) {
+	resp = new(types.AdminInfoResponse)
 	id, ok := l.ctx.Value("id").(json.Number)
 	if !ok {
 		return nil, fmt.Errorf("id is not a number")
@@ -38,8 +39,7 @@ func (l *AdminInfoLogic) AdminInfo(req *types.AdminInfoRequest) (resp *types.Adm
 		return nil, err
 	}
 
-	copier.Copy(&resp, model)
+	_ = copier.Copy(&resp, model)
 
 	return resp, nil
-
 }

@@ -78,10 +78,8 @@ func (l *AdminLoginLogic) AdminLogin(req *types.AdminLoginRequest) (resp *types.
 		return nil, errors.New("生成数据错误")
 	}
 
-	bearerToken := `Bearer ` + token
-
 	resp = &types.AdminLoginResponse{
-		Token: bearerToken,
+		Token: token,
 	}
 	return resp, nil
 }
