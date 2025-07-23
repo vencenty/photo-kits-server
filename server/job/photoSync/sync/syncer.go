@@ -3,17 +3,9 @@ package sync
 import (
 	"context"
 	"fmt"
-	"image"
-	_ "image/gif"  // 支持GIF格式
-	_ "image/jpeg" // 支持JPEG格式
-	_ "image/png"  // 支持PNG格式
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
@@ -23,19 +15,25 @@ import (
 
 // PhotoSyncer 照片同步器
 type PhotoSyncer struct {
-	config     config.SyncConfig
-	db         sqlx.SqlConn
-	photoModel model.PhotoModel
-	orderModel model.OrderModel
+	config        config.SyncConfig
+	db            sqlx.SqlConn
+	photoModel    model.PhotoModel
+	orderModel    model.OrderModel
+	imageAnalyzer *ImageAnalyzer
+	downloader    *PhotoDownloader
+	fileManager   *FileManager
 }
 
 // NewPhotoSyncer 创建一个新的照片同步器
 func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer {
 	return &PhotoSyncer{
-		config:     syncConfig,
-		db:         db,
-		photoModel: model.NewPhotoModel(db),
-		orderModel: model.NewOrderModel(db),
+		config:        syncConfig,
+		db:            db,
+		photoModel:    model.NewPhotoModel(db),
+		orderModel:    model.NewOrderModel(db),
+		imageAnalyzer: NewImageAnalyzer(),
+		downloader:    NewPhotoDownloader(syncConfig.DownloadTimeout),
+		fileManager:   NewFileManager(syncConfig.OutputPath),
 	}
 }
 
@@ -45,7 +43,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	logx.Infof("输出根目录：%s", s.config.OutputPath)
 
 	// 检查输出目录是否存在，不存在则创建
-	if err := os.MkdirAll(s.config.OutputPath, 0755); err != nil {
+	if err := s.fileManager.EnsureOutputDirectory(); err != nil {
 		logx.Errorf("无法创建输出目录: %v", err)
 		return err
 	}
@@ -121,140 +119,53 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 
 	logx.Infof("订单 %d 有 %d 张照片需要处理", order.Id, len(photos))
 
-	// 使用订单创建时间创建目录
-	baseTime := order.CreatedAt
-	logx.Infof("订单 %s 创建时间: %s，将同步到对应日期目录", order.OrderSn, baseTime.Format("2006-01-02 15:04:05"))
+	// 按规格和比例分组处理照片
+	successCount, failCount = s.downloadAllPhotos(ctx, photos, order)
 
-	// 创建订单目录
-	orderDir, err := s.createOrderDirectories(order, baseTime)
-	if err != nil {
-		logx.Errorf("创建订单目录失败: %v", err)
-		return 0, len(photos) // 目录创建失败，所有照片都算失败
-	}
-
-	// 判断是否需要清空目录（订单原状态为0表示重新编辑过，需要清空）
-	// 注意：此时订单状态已经被更新为1(处理中)，需要通过其他方式判断是否需要清空
-	// 简化处理：总是清空目录，确保每次都是全新同步
-	logx.Infof("订单 %s 清空目录重新同步", order.OrderSn)
-	if err := s.cleanOrderDirectory(orderDir); err != nil {
-		logx.Errorf("清空订单目录失败: %v", err)
-		return 0, len(photos) // 清空失败，所有照片都算失败
-	}
-	logx.Infof("已清空订单目录: %s", orderDir)
-
-	// 下载所有照片
-	successCount, failCount = s.downloadAllPhotos(ctx, photos, orderDir)
-
-	logx.Infof("订单 %s (ID: %d) 处理完成, 成功: %d, 失败: %d, 总目录: %s",
-		order.OrderSn, order.Id, successCount, failCount, orderDir)
+	logx.Infof("订单 %s (ID: %d) 处理完成, 成功: %d, 失败: %d",
+		order.OrderSn, order.Id, successCount, failCount)
 
 	return successCount, failCount
 }
 
-// AspectRatio 宽高比结构
-type AspectRatio struct {
-	Name      string
-	Ratio     float64
-	Tolerance float64
-}
-
-// 预定义的标准宽高比（只保留常用比例）
-var standardAspectRatios = []AspectRatio{
-	{Name: "1_1", Ratio: 1.0, Tolerance: 0.02},
-	{Name: "4_3", Ratio: 4.0 / 3.0, Tolerance: 0.02},
-	{Name: "16_9", Ratio: 16.0 / 9.0, Tolerance: 0.02},
-	{Name: "3_2", Ratio: 3.0 / 2.0, Tolerance: 0.02},
-}
-
-// getImageDimensions 获取图片的宽高
-func (s *PhotoSyncer) getImageDimensions(imagePath string) (width, height int, err error) {
-	file, err := os.Open(imagePath)
-	if err != nil {
-		return 0, 0, fmt.Errorf("打开图片文件失败: %v", err)
-	}
-	defer file.Close()
-
-	img, _, err := image.DecodeConfig(file)
-	if err != nil {
-		return 0, 0, fmt.Errorf("解码图片配置失败: %v", err)
-	}
-
-	return img.Width, img.Height, nil
-}
-
-// calculateAspectRatio 计算宽高比
-func calculateAspectRatio(width, height int) float64 {
-	if height == 0 {
-		return 0
-	}
-	return float64(width) / float64(height)
-}
-
-// getAspectRatioCategory 根据宽高比获取分类名称
-func getAspectRatioCategory(ratio float64) string {
-	// 标准化比例（取绝对值，因为3:4和4:3是同一个比例）
-	standardRatio := ratio
-	if ratio < 1 {
-		standardRatio = 1 / ratio
-	}
-
-	// 查找匹配的标准比例
-	for _, ar := range standardAspectRatios {
-		if abs(standardRatio-ar.Ratio) <= ar.Tolerance {
-			return ar.Name
-		}
-	}
-	return "other"
-}
-
-// abs 计算绝对值
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// downloadAllPhotos 下载订单的所有照片
-func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Photo, orderDir string) (successCount, failCount int) {
-	// 按照照片的规格分组创建目录
-	specDirs := make(map[string]string)
-	// 记录每个规格目录下已使用的文件名
+// downloadAllPhotos 下载订单的所有照片，按规格和比例分类存储
+func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Photo, order *model.Order) (successCount, failCount int) {
+	// 记录每个目录下已使用的文件名，避免重复
 	usedFileNames := make(map[string]map[string]bool)
 
 	for i, photo := range photos {
-		// 使用规格作为目录名
 		spec := photo.Spec
 		if spec == "" {
 			spec = "默认规格"
 		}
+
 		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, URL: %s",
 			i+1, len(photos), photo.Id, spec, photo.OriginUrl)
 
-		// 确保规格目录存在
-		specDir, err := s.ensureSpecDirectory(orderDir, spec, specDirs)
-		if err != nil {
-			logx.Errorf("创建规格目录失败: %v", err)
+		// 下载照片到临时位置以获取尺寸信息
+		tempFileName := fmt.Sprintf("temp_%d_%s", photo.Id, s.downloader.GetCleanFileName(photo.OriginUrl))
+		tempDir := filepath.Join(s.config.OutputPath, "temp")
+
+		// 确保临时目录存在
+		if err := os.MkdirAll(tempDir, 0755); err != nil {
+			logx.Errorf("创建临时目录失败: %v", err)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
 			continue
 		}
-
-		// 下载照片到临时位置以获取尺寸信息
-		tempFileName := fmt.Sprintf("temp_%d_%s", photo.Id, getCleanFileName(photo.OriginUrl))
-		tempPath := filepath.Join(specDir, tempFileName)
+		tempPath := filepath.Join(tempDir, tempFileName)
 
 		logx.Infof("开始下载照片到临时位置: ID: %d, 临时路径: %s", photo.Id, tempPath)
 
-		if err := s.downloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
+		if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
 			logx.Errorf("照片下载失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.OriginUrl, err)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
 			continue
 		}
 
-		// 获取图片尺寸
-		width, height, err := s.getImageDimensions(tempPath)
+		// 获取图片尺寸并分析比例
+		width, height, err := s.imageAnalyzer.GetImageDimensions(tempPath)
 		if err != nil {
 			logx.Errorf("获取图片尺寸失败, 照片ID: %d, 错误: %v", photo.Id, err)
 			// 删除临时文件
@@ -265,35 +176,36 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		}
 
 		// 计算宽高比并确定分类
-		ratio := calculateAspectRatio(width, height)
-		aspectCategory := getAspectRatioCategory(ratio)
+		ratio := s.imageAnalyzer.CalculateAspectRatio(width, height)
+		aspectCategory := s.imageAnalyzer.GetAspectRatioCategory(ratio)
 
 		logx.Infof("照片尺寸: %dx%d, 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
 
-		// 创建比例分类目录
-		aspectDir := filepath.Join(specDir, aspectCategory)
-		if err := os.MkdirAll(aspectDir, 0755); err != nil {
-			logx.Errorf("创建比例分类目录失败: %v", err)
+		// 创建基于规格的目录结构
+		finalDir, err := s.fileManager.CreateSpecBasedDirectories(order, spec, aspectCategory)
+		if err != nil {
+			logx.Errorf("创建目录失败: %v", err)
+			// 删除临时文件
 			os.Remove(tempPath)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
 			continue
 		}
 
-		// 初始化该比例目录的文件名记录
-		aspectKey := fmt.Sprintf("%s/%s", specDir, aspectCategory)
-		if usedFileNames[aspectKey] == nil {
-			usedFileNames[aspectKey] = make(map[string]bool)
+		// 初始化该目录的文件名记录
+		if usedFileNames[finalDir] == nil {
+			usedFileNames[finalDir] = make(map[string]bool)
 		}
 
 		// 生成最终文件名和路径
-		fileName := getCleanFileName(photo.OriginUrl)
-		uniqueFileName := s.generateUniqueFileName(aspectDir, fileName, usedFileNames[aspectKey])
-		finalPath := filepath.Join(aspectDir, uniqueFileName)
+		fileName := s.downloader.GetCleanFileName(photo.OriginUrl)
+		uniqueFileName := s.fileManager.GenerateUniqueFileName(finalDir, fileName, usedFileNames[finalDir])
+		finalPath := filepath.Join(finalDir, uniqueFileName)
 
 		// 移动临时文件到最终位置
-		if err := os.Rename(tempPath, finalPath); err != nil {
+		if err := s.moveFile(tempPath, finalPath); err != nil {
 			logx.Errorf("移动文件到最终位置失败: %v", err)
+			// 删除临时文件
 			os.Remove(tempPath)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
 			failCount++
@@ -301,7 +213,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		}
 
 		// 标记文件名已使用
-		usedFileNames[aspectKey][uniqueFileName] = true
+		usedFileNames[finalDir][uniqueFileName] = true
 
 		logx.Infof("照片下载成功: ID: %d, 保存路径: %s, 尺寸: %dx%d, 比例: %s",
 			photo.Id, finalPath, width, height, aspectCategory)
@@ -312,56 +224,6 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 	return successCount, failCount
 }
 
-// generateUniqueFileName 生成唯一的文件名，避免重复
-func (s *PhotoSyncer) generateUniqueFileName(dir, fileName string, usedNames map[string]bool) string {
-	// 检查原始文件名是否已使用
-	if !usedNames[fileName] && !s.fileExists(filepath.Join(dir, fileName)) {
-		return fileName
-	}
-
-	// 分离文件名和扩展名
-	ext := filepath.Ext(fileName)
-	nameWithoutExt := strings.TrimSuffix(fileName, ext)
-
-	// 尝试添加数字后缀
-	counter := 1
-	for {
-		newFileName := fmt.Sprintf("%s-%d%s", nameWithoutExt, counter, ext)
-
-		// 检查是否在内存记录和文件系统中都不存在
-		if !usedNames[newFileName] && !s.fileExists(filepath.Join(dir, newFileName)) {
-			logx.Infof("生成唯一文件名: %s -> %s", fileName, newFileName)
-			return newFileName
-		}
-
-		counter++
-
-		// 防止无限循环
-		if counter > 9999 {
-			timestamp := time.Now().Format("150405")
-			newFileName := fmt.Sprintf("%s-%s%s", nameWithoutExt, timestamp, ext)
-			logx.Infof("达到最大重试次数，使用时间戳: %s -> %s", fileName, newFileName)
-			return newFileName
-		}
-	}
-}
-
-// ensureSpecDirectory 确保规格目录存在，返回目录路径
-func (s *PhotoSyncer) ensureSpecDirectory(orderDir, spec string, specDirs map[string]string) (string, error) {
-	if specDir, exists := specDirs[spec]; exists {
-		return specDir, nil
-	}
-
-	// 创建规格目录
-	fullSpecDir := filepath.Join(orderDir, spec)
-	logx.Infof("创建规格目录: %s", fullSpecDir)
-	if err := os.MkdirAll(fullSpecDir, 0755); err != nil {
-		return "", fmt.Errorf("创建规格目录失败 %s: %v", spec, err)
-	}
-	specDirs[spec] = fullSpecDir
-	return fullSpecDir, nil
-}
-
 // updatePhotoStatus 更新照片状态
 func (s *PhotoSyncer) updatePhotoStatus(ctx context.Context, photoId uint64, status int64, errMsg string) {
 	if err := s.photoModel.UpdateStatus(ctx, photoId, status, errMsg); err != nil {
@@ -369,169 +231,37 @@ func (s *PhotoSyncer) updatePhotoStatus(ctx context.Context, photoId uint64, sta
 	}
 }
 
-// createOrderDirectories 创建订单的目录结构，返回订单目录路径
-func (s *PhotoSyncer) createOrderDirectories(order *model.Order, baseTime time.Time) (string, error) {
-	// 创建年份目录（如："2025"）
-	yearName := fmt.Sprintf("%d", baseTime.Year())
-	yearDir := filepath.Join(s.config.OutputPath, yearName)
-	if err := os.MkdirAll(yearDir, 0755); err != nil {
-		return "", fmt.Errorf("创建年份目录失败: %v", err)
-	}
-
-	// 创建年月目录（如："202506"）
-	monthName := fmt.Sprintf("%d%02d", baseTime.Year(), int(baseTime.Month()))
-	monthDir := filepath.Join(yearDir, monthName)
-	if err := os.MkdirAll(monthDir, 0755); err != nil {
-		return "", fmt.Errorf("创建月份目录失败: %v", err)
-	}
-
-	// 创建年月日目录（如："20250601"）
-	dateStr := baseTime.Format("20060102")
-	dateDir := filepath.Join(monthDir, dateStr)
-	if err := os.MkdirAll(dateDir, 0755); err != nil {
-		return "", fmt.Errorf("创建日期目录失败: %v", err)
-	}
-
-	// 创建以收货人姓名-订单号为名的目录
-	orderDir := filepath.Join(dateDir, fmt.Sprintf("%s-%s", order.Receiver, order.OrderSn))
-	if err := os.MkdirAll(orderDir, 0755); err != nil {
-		return "", fmt.Errorf("创建订单目录失败: %v", err)
-	}
-
-	logx.Infof("为订单 %s 创建目录: %s (基于时间: %s)", order.OrderSn, orderDir, baseTime.Format("2006-01-02 15:04:05"))
-
-	return orderDir, nil
-}
-
-// downloadPhoto 下载照片
-func (s *PhotoSyncer) downloadPhoto(ctx context.Context, photoUrl, destPath string) error {
-	timeout := time.Duration(s.config.DownloadTimeout) * time.Second
-	logx.Infof("下载照片到: %s, 超时时间: %v", destPath, timeout)
-
-	// 解析URL
-	parsedURL, err := url.Parse(photoUrl)
-	if err != nil {
-		return fmt.Errorf("解析URL失败: %v", err)
-	}
-
-	// 确保URL是绝对URL
-	if !parsedURL.IsAbs() {
-		return fmt.Errorf("URL不是绝对URL: %s", photoUrl)
-	}
-
-	// 创建HTTP客户端，设置超时
-	client := &http.Client{
-		Timeout: timeout,
-	}
-
-	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, photoUrl, nil)
-	if err != nil {
-		return fmt.Errorf("创建HTTP请求失败: %v", err)
-	}
-
-	// 发送请求
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("HTTP请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP响应状态码不是200: %d", resp.StatusCode)
-	}
-
-	// 创建临时文件
-	tempPath := destPath + ".tmp"
-	out, err := os.Create(tempPath)
-	if err != nil {
-		return fmt.Errorf("创建临时文件失败: %v", err)
-	}
-	defer out.Close()
-
-	// 复制内容
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		os.Remove(tempPath)
-		return fmt.Errorf("保存文件内容失败: %v", err)
-	}
-
-	// 关闭文件
-	out.Close()
-
-	// 原子性重命名，避免部分写入的文件
-	if err := os.Rename(tempPath, destPath); err != nil {
-		os.Remove(tempPath)
-		return fmt.Errorf("重命名文件失败: %v", err)
-	}
-
-	return nil
-}
-
-// getCleanFileName 从URL中提取不含查询参数的文件名
-func getCleanFileName(fileUrl string) string {
-	// 先获取URL的基本文件名
-	fileName := filepath.Base(fileUrl)
-
-	// 移除查询参数部分
-	if queryIndex := strings.Index(fileName, "?"); queryIndex > 0 {
-		fileName = fileName[:queryIndex]
-	}
-
-	return fileName
-}
-
-// fileExists 检查文件是否存在
-func (s *PhotoSyncer) fileExists(filePath string) bool {
-	_, err := os.Stat(filePath)
-	return err == nil
-}
-
-// cleanOrderDirectory 清空订单目录中的所有内容
-func (s *PhotoSyncer) cleanOrderDirectory(orderDir string) error {
-	// 检查目录是否存在
-	if _, err := os.Stat(orderDir); os.IsNotExist(err) {
-		logx.Infof("订单目录不存在，无需清空: %s", orderDir)
+// moveFile 移动文件
+func (s *PhotoSyncer) moveFile(src, dst string) error {
+	// 首先尝试直接重命名（在同一文件系统上这是原子操作）
+	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
 
-	logx.Infof("开始清空订单目录: %s", orderDir)
-
-	// 打开订单目录
-	dir, err := os.Open(orderDir)
+	// 如果重命名失败，则复制文件然后删除源文件
+	srcFile, err := os.Open(src)
 	if err != nil {
-		return fmt.Errorf("打开订单目录失败: %v", err)
+		return fmt.Errorf("打开源文件失败: %v", err)
 	}
-	defer dir.Close()
+	defer srcFile.Close()
 
-	// 读取目录中的所有文件和子目录
-	files, err := dir.Readdir(0)
+	dstFile, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("读取目录内容失败: %v", err)
+		return fmt.Errorf("创建目标文件失败: %v", err)
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		os.Remove(dst) // 清理部分写入的文件
+		return fmt.Errorf("复制文件内容失败: %v", err)
 	}
 
-	// 遍历所有文件和子目录，删除它们
-	for _, file := range files {
-		filePath := filepath.Join(orderDir, file.Name())
-
-		if file.IsDir() {
-			if err := os.RemoveAll(filePath); err != nil {
-				logx.Errorf("删除目录失败: %s, 错误: %v", filePath, err)
-				// 继续删除其他文件，不返回错误
-			} else {
-				logx.Infof("已删除目录: %s", filePath)
-			}
-		} else {
-			if err := os.Remove(filePath); err != nil {
-				logx.Errorf("删除文件失败: %s, 错误: %v", filePath, err)
-				// 继续删除其他文件，不返回错误
-			} else {
-				logx.Infof("已删除文件: %s", filePath)
-			}
-		}
+	// 删除源文件
+	if err := os.Remove(src); err != nil {
+		logx.Errorf("删除临时文件失败: %v", err)
+		// 不返回错误，因为文件已经成功复制
 	}
 
-	logx.Infof("订单目录清空完成: %s", orderDir)
 	return nil
 }
