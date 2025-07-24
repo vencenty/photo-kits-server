@@ -66,7 +66,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	}
 
 	logx.Infof("===== 开始处理订单 =====")
-	logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s", order.Id, order.OrderSn, order.Receiver)
+	logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s, 重试次数: %d", order.Id, order.OrderSn, order.Receiver, order.RetryCount)
 
 	// 处理订单照片
 	successCount, failCount := s.processOrderPhotos(ctx, order)

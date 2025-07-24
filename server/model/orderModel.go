@@ -81,9 +81,15 @@ func (m *customOrderModel) UpdateStatus(ctx context.Context, id uint64, status i
 
 // GetAndLockPendingOrder 原子性获取并锁定一个待处理订单（考虑重试次数限制）
 func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, error) {
-	// 使用MySQL的原子更新操作来实现锁定
-	// 优先获取待处理订单(status=0)，失败订单(status=-1)需要重试次数小于3次
-	// 按优先级和时间排序：待处理订单优先，然后是重试次数少的失败订单
+	// 简单粗暴解决幽灵锁：先重置所有超过30分钟的处理中订单
+	resetQuery := fmt.Sprintf(`
+		UPDATE %s 
+		SET status = ?, retry_count = retry_count + 1, last_error = '处理超时重置', updated_at = NOW()
+		WHERE status = ? AND updated_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+	`, m.table)
+	m.conn.ExecCtx(ctx, resetQuery, OrderStatusFailed, OrderStatusProcessing)
+
+	// 获取订单：优先待处理，然后是重试次数<3的失败订单
 	updateQuery := fmt.Sprintf(`
 		UPDATE %s 
 		SET status = ? 
@@ -105,13 +111,11 @@ func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, 
 		return nil, err
 	}
 
-	// 检查是否有行被更新
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return nil, err
 	}
 	if rowsAffected == 0 {
-		// 没有待处理的订单
 		return nil, fmt.Errorf("record not found")
 	}
 
