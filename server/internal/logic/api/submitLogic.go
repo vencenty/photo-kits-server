@@ -125,6 +125,7 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 				Status:    model.PhotoStatusPending, // 设置为待处理状态
 				Error:     "",                       // 初始化错误信息为空
 				IsResized: metadata.IsResized,
+				Num:       metadata.Num,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}

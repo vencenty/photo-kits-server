@@ -63,6 +63,7 @@ func (l *OrderInfoLogic) OrderInfo(req *types.OrderInfoRequest) (resp *types.Ord
 		photosBySpec[p.Spec] = append(photosBySpec[p.Spec], types.PhotoMetadata{
 			URL:       p.Url,
 			IsResized: p.IsResized,
+			Num:       p.Num,
 		})
 	}
 

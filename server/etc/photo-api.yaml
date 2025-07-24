@@ -18,7 +18,7 @@ Database:
 
 Auth:
   AccessSecret: "vencenty"
-  AccessExpire: 3600
+  AccessExpire: 864000
 
 Minio:
   Schema: "https"

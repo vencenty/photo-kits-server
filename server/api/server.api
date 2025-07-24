@@ -22,6 +22,8 @@ type PhotoMetadata {
 	URL string `json:"url"`
 	// 是否已经调整过尺寸
 	IsResized int64 `json:"is_resized"`
+	// 照片数量
+	Num int64 `json:"num"`
 }
 
 type SubmitRequest {

@@ -29,6 +29,7 @@ type (
 		FindProcessingOrders(ctx context.Context, limit int) ([]*Order, error)
 		UpdateStatus(ctx context.Context, id uint64, status int64) error
 		GetAndLockPendingOrder(ctx context.Context) (*Order, error)
+		UpdateFailureCount(ctx context.Context, id uint64, errorMsg string) error
 		FindOrdersWithPagination(ctx context.Context, orderSn, receiver, remark string, status int64, createdAt string, page, pageSize int64) ([]*Order, int64, error)
 		DeleteOrdersByIds(ctx context.Context, orderIds []int64) (int64, error)
 	}
@@ -78,24 +79,28 @@ func (m *customOrderModel) UpdateStatus(ctx context.Context, id uint64, status i
 	return err
 }
 
-// GetAndLockPendingOrder 原子性获取并锁定一个待处理订单
+// GetAndLockPendingOrder 原子性获取并锁定一个待处理订单（考虑重试次数限制）
 func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, error) {
 	// 使用MySQL的原子更新操作来实现锁定
-	// 直接更新一行并返回更新前的信息
+	// 优先获取待处理订单(status=0)，失败订单(status=-1)需要重试次数小于3次
+	// 按优先级和时间排序：待处理订单优先，然后是重试次数少的失败订单
 	updateQuery := fmt.Sprintf(`
 		UPDATE %s 
 		SET status = ? 
 		WHERE id = (
 			SELECT id FROM (
 				SELECT id FROM %s 
-				WHERE status IN (?, ?) 
-				ORDER BY created_at ASC 
+				WHERE (status = ? OR (status = ? AND retry_count < 3))
+				ORDER BY 
+					CASE WHEN status = ? THEN 0 ELSE 1 END,
+					retry_count ASC,
+					created_at ASC 
 				LIMIT 1
 			) AS tmp
 		)
 	`, m.table, m.table)
 
-	result, err := m.conn.ExecCtx(ctx, updateQuery, OrderStatusProcessing, OrderStatusPending, OrderStatusFailed)
+	result, err := m.conn.ExecCtx(ctx, updateQuery, OrderStatusProcessing, OrderStatusPending, OrderStatusFailed, OrderStatusPending)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +124,13 @@ func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, 
 	}
 
 	return &order, nil
+}
+
+// UpdateFailureCount 更新订单失败次数和错误信息
+func (m *customOrderModel) UpdateFailureCount(ctx context.Context, id uint64, errorMsg string) error {
+	query := fmt.Sprintf("UPDATE %s SET status = ?, retry_count = retry_count + 1, last_error = ?, updated_at = NOW() WHERE id = ?", m.table)
+	_, err := m.conn.ExecCtx(ctx, query, OrderStatusFailed, errorMsg, id)
+	return err
 }
 
 // FindOrdersWithPagination 分页查询订单列表

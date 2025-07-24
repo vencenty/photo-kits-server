@@ -85,23 +85,18 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 
 // updateOrderStatusByResult 根据下载结果更新订单状态
 func (s *PhotoSyncer) updateOrderStatusByResult(ctx context.Context, orderId uint64, orderSn string, successCount, failCount int) error {
-	var newStatus int64
-	var statusName string
-
 	if failCount == 0 {
 		// 全部成功 - status = 2 (已完成)
-		newStatus = model.OrderStatusCompleted
-		statusName = "同步成功"
+		logx.Infof("订单 %s 处理结果: 成功 %d 张, 失败 %d 张, 状态更新为: 同步成功",
+			orderSn, successCount, failCount)
+		return s.orderModel.UpdateStatus(ctx, orderId, model.OrderStatusCompleted)
 	} else {
-		// 有失败 - status = -1 (失败，下次会重新处理)
-		newStatus = model.OrderStatusFailed
-		statusName = "同步失败"
+		// 有失败 - 增加重试次数，状态设为失败（可能重试）
+		errorMsg := fmt.Sprintf("订单处理失败: 成功 %d 张, 失败 %d 张", successCount, failCount)
+		logx.Infof("订单 %s 处理结果: 成功 %d 张, 失败 %d 张, 增加重试次数",
+			orderSn, successCount, failCount)
+		return s.orderModel.UpdateFailureCount(ctx, orderId, errorMsg)
 	}
-
-	logx.Infof("订单 %s 处理结果: 成功 %d 张, 失败 %d 张, 状态更新为: %s",
-		orderSn, successCount, failCount, statusName)
-
-	return s.orderModel.UpdateStatus(ctx, orderId, newStatus)
 }
 
 // processOrderPhotos 处理订单的照片
