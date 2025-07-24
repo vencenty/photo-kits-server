@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
@@ -130,8 +131,8 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 
 // downloadAllPhotos 下载订单的所有照片，按规格和比例分类存储
 func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Photo, order *model.Order) (successCount, failCount int) {
-	// 记录每个目录下已使用的文件名，避免重复
-	usedFileNames := make(map[string]map[string]bool)
+	// 记录每个目录下的文件计数器，用于生成简单的数字文件名
+	dirCounters := make(map[string]int)
 
 	for i, photo := range photos {
 		spec := photo.Spec
@@ -192,15 +193,19 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			continue
 		}
 
-		// 初始化该目录的文件名记录
-		if usedFileNames[finalDir] == nil {
-			usedFileNames[finalDir] = make(map[string]bool)
+		// 为该目录生成下一个文件序号
+		dirCounters[finalDir]++
+		fileCounter := dirCounters[finalDir]
+
+		// 提取原始文件扩展名
+		originalExt := s.getFileExtension(photo.OriginUrl)
+		if originalExt == "" {
+			originalExt = ".jpg" // 默认扩展名
 		}
 
-		// 生成最终文件名和路径
-		fileName := s.downloader.GetCleanFileName(photo.OriginUrl)
-		uniqueFileName := s.fileManager.GenerateUniqueFileName(finalDir, fileName, usedFileNames[finalDir])
-		finalPath := filepath.Join(finalDir, uniqueFileName)
+		// 生成简单的数字文件名
+		fileName := fmt.Sprintf("%d%s", fileCounter, originalExt)
+		finalPath := filepath.Join(finalDir, fileName)
 
 		// 移动临时文件到最终位置
 		if err := s.moveFile(tempPath, finalPath); err != nil {
@@ -212,16 +217,29 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			continue
 		}
 
-		// 标记文件名已使用
-		usedFileNames[finalDir][uniqueFileName] = true
-
-		logx.Infof("照片下载成功: ID: %d, 保存路径: %s, 尺寸: %dx%d, 比例: %s",
-			photo.Id, finalPath, width, height, aspectCategory)
+		logx.Infof("照片下载成功: ID: %d, 保存路径: %s, 文件名: %s, 尺寸: %dx%d, 比例: %s",
+			photo.Id, finalPath, fileName, width, height, aspectCategory)
 		s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusSuccess, "")
 		successCount++
 	}
 
 	return successCount, failCount
+}
+
+// getFileExtension 从URL中提取文件扩展名
+func (s *PhotoSyncer) getFileExtension(url string) string {
+	// 先去掉URL参数
+	if idx := strings.Index(url, "?"); idx != -1 {
+		url = url[:idx]
+	}
+
+	// 提取扩展名
+	ext := filepath.Ext(url)
+	if ext != "" {
+		return strings.ToLower(ext)
+	}
+
+	return ""
 }
 
 // updatePhotoStatus 更新照片状态
