@@ -6,6 +6,7 @@ type Config struct {
 	rest.RestConf
 	Database  Database  `json:"database"`
 	Minio     Minio     `json:"minio"`
+	AliyunOSS AliyunOSS `json:"aliyunOSS"`
 	AliyunCDN AliyunCDN `json:"aliyunCDN"`
 	PushDeer  PushDeer  `json:"pushDeer"`
 	Auth      Auth      `json:"auth"`
@@ -35,4 +36,11 @@ type AliyunCDN struct {
 
 type PushDeer struct {
 	Keys []string `json:"keys"`
+}
+
+type AliyunOSS struct {
+	Endpoint        string `json:"endpoint"`
+	AccessKeyId     string `json:"accessKeyId"`
+	AccessKeySecret string `json:"accessKeySecret"`
+	BucketName      string `json:"bucketName"`
 }
