@@ -202,6 +202,10 @@ service photo-api {
 	@handler Upload
 	post /api/photo/upload returns (UploadResponse)
 
+	// 上传到oss
+	@handler UploadOss
+	post /api/upload/oss returns (UploadResponse)
+
 	// 提交订单
 	@handler Submit
 	post /api/order/submit (SubmitRequest) returns (SubmitResponse)

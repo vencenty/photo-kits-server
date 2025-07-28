@@ -23,7 +23,7 @@ type PhotoClassifier struct {
 }
 
 // 支持的图片格式
-var supportedFormats = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic"}
+var supportedFormats = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".heic", "heif"}
 
 // 分类文件夹映射
 var aspectRatioFolders = map[string]string{
@@ -192,67 +192,75 @@ func (pc *PhotoClassifier) ClassifyPhotos() error {
 		}
 	}
 
-	// 读取源目录中的所有文件
-	files, err := ioutil.ReadDir(pc.SourceDir)
-	if err != nil {
-		return fmt.Errorf("读取源目录失败: %v", err)
-	}
-
 	stats := make(map[string]int)
 	var totalImages int
 
-	// 遍历所有文件
-	for _, file := range files {
-		if file.IsDir() {
-			continue
+	// 递归遍历所有图片文件
+	err := filepath.WalkDir(pc.SourceDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("访问路径失败 %s: %v", path, err)
+			return nil
+		}
+		if d.IsDir() {
+			return nil
 		}
 
-		filename := file.Name()
+		filename := d.Name()
 		if !isImageFile(filename) {
-			continue
+			return nil
 		}
 
 		totalImages++
-		srcPath := filepath.Join(pc.SourceDir, filename)
 
 		// 获取图片尺寸
-		width, height, err := getImageDimensions(srcPath)
+		width, height, err := getImageDimensions(path)
 		if err != nil {
 			log.Printf("无法读取图片尺寸 %s: %v", filename, err)
-			continue
+			return nil
 		}
 
 		// 分类
 		category := classifyAspectRatio(width, height)
 		stats[category]++
 
-		// 确定最终文件名和路径
+		// 确定最终文件名
 		var finalFilename string
 		if strings.ToLower(filepath.Ext(filename)) == ".heic" {
-			// HEIC文件转换为JPG格式保存
 			finalFilename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
 		} else {
 			finalFilename = filename
 		}
 
-		// 复制到对应文件夹
+		// 构建目标路径
 		dstDir := filepath.Join(pc.OutputDir, aspectRatioFolders[category])
 		dstPath := filepath.Join(dstDir, finalFilename)
 
-		// 处理HEIC文件：转换为JPG后保存
+		// 如果文件名冲突，可以加个前缀（比如原始子路径）
+		if _, err := os.Stat(dstPath); err == nil {
+			uniquePrefix := strings.ReplaceAll(strings.TrimPrefix(filepath.Dir(path), pc.SourceDir), string(os.PathSeparator), "_")
+			finalFilename = fmt.Sprintf("%s_%s", uniquePrefix, finalFilename)
+			dstPath = filepath.Join(dstDir, finalFilename)
+		}
+
+		// HEIC 转 JPG 或 复制原图
 		if strings.ToLower(filepath.Ext(filename)) == ".heic" {
-			if err := convertHeicToJpg(srcPath, dstPath); err != nil {
+			if err := convertHeicToJpg(path, dstPath); err != nil {
 				log.Printf("HEIC转JPG失败 %s: %v", filename, err)
-				continue
+				return nil
 			}
 		} else {
-			if err := copyFile(srcPath, dstPath); err != nil {
+			if err := copyFile(path, dstPath); err != nil {
 				log.Printf("复制文件失败 %s: %v", finalFilename, err)
-				continue
+				return nil
 			}
 		}
 
 		fmt.Printf("分类: %s -> %s (尺寸: %dx%d)\n", finalFilename, category, width, height)
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("遍历目录失败: %v", err)
 	}
 
 	// 输出统计信息
