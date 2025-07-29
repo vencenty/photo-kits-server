@@ -43,4 +43,6 @@ type AliyunOSS struct {
 	AccessKeyId     string `json:"accessKeyId"`
 	AccessKeySecret string `json:"accessKeySecret"`
 	BucketName      string `json:"bucketName"`
+	CDNDomain       string `json:"cdnDomain"`
+	Schema          string `json:"schema"`
 }

@@ -172,3 +172,69 @@ func (fm *FileManager) EnsureOutputDirectory() error {
 	}
 	return nil
 }
+
+// CleanOrderFiles 清理指定订单的所有文件
+func (fm *FileManager) CleanOrderFiles(order *model.Order) error {
+	logx.Infof("开始清理订单 %s 的旧文件", order.OrderSn)
+
+	baseTime := order.CreatedAt
+
+	// 构建订单目录路径
+	yearName := fmt.Sprintf("%d", baseTime.Year())
+	monthName := fmt.Sprintf("%d%02d", baseTime.Year(), int(baseTime.Month()))
+	dateStr := baseTime.Format("20060102")
+
+	// 构建到订单目录的路径（不包含规格和比例）
+	orderBasePath := filepath.Join(fm.outputPath, yearName, monthName, dateStr)
+
+	// 检查订单基础目录是否存在
+	if _, err := os.Stat(orderBasePath); os.IsNotExist(err) {
+		logx.Infof("订单 %s 的目录不存在，无需清理: %s", order.OrderSn, orderBasePath)
+		return nil
+	}
+
+	// 遍历所有规格目录，查找包含该订单的目录
+	specDirs, err := os.ReadDir(orderBasePath)
+	if err != nil {
+		return fmt.Errorf("读取规格目录失败: %v", err)
+	}
+
+	cleanedCount := 0
+	for _, specDir := range specDirs {
+		if !specDir.IsDir() {
+			continue
+		}
+
+		specPath := filepath.Join(orderBasePath, specDir.Name())
+
+		// 查找包含该订单的目录
+		orderDirs, err := os.ReadDir(specPath)
+		if err != nil {
+			logx.Errorf("读取规格目录 %s 失败: %v", specPath, err)
+			continue
+		}
+
+		for _, orderDir := range orderDirs {
+			if !orderDir.IsDir() {
+				continue
+			}
+
+			// 检查是否是当前订单的目录
+			if strings.HasPrefix(orderDir.Name(), order.OrderSn) {
+				orderDirPath := filepath.Join(specPath, orderDir.Name())
+				logx.Infof("找到订单目录: %s", orderDirPath)
+
+				// 删除整个订单目录
+				if err := os.RemoveAll(orderDirPath); err != nil {
+					logx.Errorf("删除订单目录失败: %s, 错误: %v", orderDirPath, err)
+				} else {
+					logx.Infof("已删除订单目录: %s", orderDirPath)
+					cleanedCount++
+				}
+			}
+		}
+	}
+
+	logx.Infof("订单 %s 文件清理完成，共清理 %d 个目录", order.OrderSn, cleanedCount)
+	return nil
+}
