@@ -110,3 +110,7 @@ type UploadResponse struct {
 	Sha1     string `json:"sha1"`
 	URL      string `json:"url"`
 }
+
+type DownloadRequest struct {
+	Filename string `form:"filename"` // 要下载的文件名
+}

@@ -82,6 +82,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 				Path:    "/api/upload/oss",
 				Handler: api.UploadOssHandler(serverCtx),
 			},
+			{
+				Method:  http.MethodGet,
+				Path:    "/api/download/oss",
+				Handler: api.DownloadOssHandler(serverCtx),
+			},
 		},
 	)
 }
