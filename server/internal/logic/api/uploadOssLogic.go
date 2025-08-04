@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -97,12 +98,40 @@ func (l *UploadOssLogic) UploadOss() (resp *types.UploadResponse, err error) {
 		return resp, err
 	}
 
+	// 生成访问URL
+	var fileURL string
+
+	// 判断是否为私有存储桶
+	if l.svcCtx.Config.AliyunOSS.IsPrivate {
+		// 私有存储桶，生成带签名的临时访问URL
+		expireTime := time.Duration(l.svcCtx.Config.AliyunOSS.SignedUrlExpire) * time.Second
+		signedURL, err := bucket.SignURL(objectName, oss.HTTPGet, int64(expireTime.Seconds()))
+		if err != nil {
+			logx.Errorf("生成签名URL失败: %v", err)
+			// 如果签名URL生成失败，使用直接URL
+			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.ProxyDomain, objectName)
+		} else {
+			fileURL = signedURL
+			logx.Infof("生成私有存储桶签名URL，过期时间: %d秒", l.svcCtx.Config.AliyunOSS.SignedUrlExpire)
+		}
+	} else {
+		// 公共存储桶，直接生成访问URL
+		if l.svcCtx.Config.AliyunOSS.CDNDomain != "" {
+			// 优先使用CDN域名
+			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.CDNDomain, objectName)
+		} else {
+			// 使用代理域名
+			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.ProxyDomain, objectName)
+		}
+	}
+
+	logx.Infof("文件上传成功，访问URL: %s", fileURL)
+
 	// 返回响应
 	return &types.UploadResponse{
 		Filename: handler.Filename,
 		Size:     handler.Size,
 		Sha1:     fileSha1Sum,
-		//URL:      fmt.Sprintf("%s://%s/%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.CDNDomain, l.svcCtx.Config.AliyunOSS.BucketName, objectName),
-		URL: fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.CDNDomain, objectName),
+		URL:      fileURL,
 	}, nil
 }

@@ -76,8 +76,11 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 		order.Receiver = req.Receiver
 		order.Remark = req.Remark
 		order.UpdatedAt = time.Now()
-		// 改为代处理状态，让系统重新同步一次
-		order.Status = model.OrderStatusPending
+
+		// 如果是手动保存，那么设置订单状态为待处理，让脚本重新同步。
+		if req.SaveType == model.ORDER_SAVE_TYPE_MANUAL {
+			order.Status = model.OrderStatusPending
+		}
 
 		if err = l.orderModel.Update(l.ctx, order); err != nil {
 			return nil, err
@@ -130,7 +133,7 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 				UpdatedAt: time.Now(),
 			}
 			photos = append(photos, p)
-			totalPhotos++
+			totalPhotos += p.Num
 			specCount[photo.Spec]++
 			if metadata.IsResized == 1 {
 				specResizedCount[photo.Spec]++
@@ -151,7 +154,11 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 
 	// 发送 PushDeer 通知
 	isNewOrder := order.Id == uint64(orderId) // 如果orderId不为0，说明是新创建的订单
-	go l.sendPushDeerNotification(req, specCount, specResizedCount, totalPhotos, isNewOrder)
+
+	// 如果是手动保存，那么发送通知
+	if req.SaveType == model.ORDER_SAVE_TYPE_MANUAL {
+		go l.sendPushDeerNotification(req, specCount, specResizedCount, totalPhotos, isNewOrder)
+	}
 
 	resp = new(types.SubmitResponse)
 	resp.Total = totalPhotos

@@ -44,5 +44,8 @@ type AliyunOSS struct {
 	AccessKeySecret string `json:"accessKeySecret"`
 	BucketName      string `json:"bucketName"`
 	CDNDomain       string `json:"cdnDomain"`
+	ProxyDomain     string `json:"proxyDomain"`
 	Schema          string `json:"schema"`
+	IsPrivate       bool   `json:"isPrivate"`       // OSS存储桶是否为私有访问
+	SignedUrlExpire int64  `json:"signedUrlExpire"` // 签名URL过期时间（秒）
 }

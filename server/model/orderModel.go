@@ -19,6 +19,11 @@ const (
 	OrderStatusCompleted = 2
 )
 
+const (
+	ORDER_SAVE_TYPE_MANUAL = "manual"
+	ORDER_SAVE_TYPE_AUTO   = "auto"
+)
+
 type (
 	// OrderModel is an interface to be customized, add more methods here,
 	// and implement the added methods in customOrderModel.
@@ -83,7 +88,7 @@ func (m *customOrderModel) UpdateStatus(ctx context.Context, id uint64, status i
 func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, error) {
 	// 简单粗暴解决幽灵锁：先重置所有超过30分钟的处理中订单
 	resetQuery := fmt.Sprintf(`
-		UPDATE %s 
+		UPDATE %s
 		SET status = ?, retry_count = retry_count + 1, last_error = '处理超时重置', updated_at = NOW()
 		WHERE status = ? AND updated_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)
 	`, m.table)
@@ -91,16 +96,16 @@ func (m *customOrderModel) GetAndLockPendingOrder(ctx context.Context) (*Order, 
 
 	// 获取订单：优先待处理，然后是重试次数<3的失败订单
 	updateQuery := fmt.Sprintf(`
-		UPDATE %s 
-		SET status = ? 
+		UPDATE %s
+		SET status = ?
 		WHERE id = (
 			SELECT id FROM (
-				SELECT id FROM %s 
+				SELECT id FROM %s
 				WHERE (status = ? OR (status = ? AND retry_count < 3))
-				ORDER BY 
+				ORDER BY
 					CASE WHEN status = ? THEN 0 ELSE 1 END,
 					retry_count ASC,
-					created_at ASC 
+					created_at ASC
 				LIMIT 1
 			) AS tmp
 		)

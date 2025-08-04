@@ -96,6 +96,7 @@ type SubmitRequest struct {
 	OrderSn    string  `json:"order_sn"`
 	Receiver   string  `json:"receiver"`
 	Remark     string  `json:"remark"`
+	SaveType   string  `json:"save_type"`
 	PhotoCount int64   `json:"photo_count,optional"`
 	Photos     []Photo `json:"photos"`
 }
@@ -109,8 +110,4 @@ type UploadResponse struct {
 	Size     int64  `json:"size"`
 	Sha1     string `json:"sha1"`
 	URL      string `json:"url"`
-}
-
-type DownloadRequest struct {
-	Filename string `form:"filename"` // 要下载的文件名
 }

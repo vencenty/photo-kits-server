@@ -33,6 +33,8 @@ type SubmitRequest {
 	Receiver string `json:"receiver"`
 	// 备注信息
 	Remark string `json:"remark"`
+	// 保存类型
+	SaveType string `json:"save_type"`
 	// 照片数量
 	PhotoCount int64 `json:"photo_count,optional"`
 	// 照片列表

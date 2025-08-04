@@ -132,96 +132,176 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 
 // downloadAllPhotos 下载订单的所有照片，按规格和比例分类存储
 func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Photo, order *model.Order) (successCount, failCount int) {
-	// 记录每个目录下的文件计数器，用于生成简单的数字文件名
-	dirCounters := make(map[string]int)
+	// 记录已使用的文件名，避免重复
+	usedFileNames := make(map[string]bool)
+	// 照片序号计数器，从1开始
+	photoIndex := 0
 
 	for i, photo := range photos {
+		photoIndex++ // 为每张照片分配一个序号
 		spec := photo.Spec
 		if spec == "" {
 			spec = "默认规格"
 		}
 
-		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, URL: %s",
-			i+1, len(photos), photo.Id, spec, photo.OriginUrl)
-
-		// 下载照片到临时位置以获取尺寸信息
-		tempFileName := fmt.Sprintf("temp_%d_%s", photo.Id, s.downloader.GetCleanFileName(photo.OriginUrl))
-		tempDir := filepath.Join(s.config.OutputPath, "temp")
-
-		// 确保临时目录存在
-		if err := os.MkdirAll(tempDir, 0755); err != nil {
-			logx.Errorf("创建临时目录失败: %v", err)
-			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
-			failCount++
-			continue
-		}
-		tempPath := filepath.Join(tempDir, tempFileName)
-
-		logx.Infof("开始下载照片到临时位置: ID: %d, 临时路径: %s", photo.Id, tempPath)
-
-		if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
-			logx.Errorf("照片下载失败, 照片ID: %d, URL: %s, 错误: %v", photo.Id, photo.OriginUrl, err)
-			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
-			failCount++
-			continue
+		// 获取该照片需要下载的数量，默认为1
+		downloadCount := photo.Num
+		if downloadCount <= 0 {
+			downloadCount = 1
 		}
 
-		// 获取图片尺寸并分析比例
-		width, height, err := s.imageAnalyzer.GetImageDimensions(tempPath)
-		if err != nil {
-			logx.Errorf("获取图片尺寸失败, 照片ID: %d, 错误: %v", photo.Id, err)
-			// 删除临时文件
-			os.Remove(tempPath)
-			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
-			failCount++
-			continue
+		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, 需要下载数量: %d, URL: %s",
+			i+1, len(photos), photo.Id, spec, downloadCount, photo.OriginUrl)
+
+		// 记录该照片的成功和失败次数
+		photoSuccessCount := 0
+		photoFailCount := 0
+
+		// 保存第一次分析的结果，供后续副本使用
+		var firstAnalysisResult struct {
+			width          int
+			height         int
+			ratio          float64
+			aspectCategory string
+			finalDir       string
 		}
 
-		// 计算宽高比并确定分类
-		ratio := s.imageAnalyzer.CalculateAspectRatio(width, height)
-		aspectCategory := s.imageAnalyzer.GetAspectRatioCategory(ratio)
+		// 根据num字段循环下载指定数量的文件
+		for copyIndex := 1; copyIndex <= int(downloadCount); copyIndex++ {
+			logx.Infof("下载照片副本 %d/%d: 照片ID: %d", copyIndex, downloadCount, photo.Id)
 
-		logx.Infof("照片尺寸: %dx%d, 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
+			// 下载照片到临时位置以获取尺寸信息
+			tempFileName := fmt.Sprintf("temp_%d_%d_%s", photo.Id, copyIndex, s.downloader.GetCleanFileName(photo.OriginUrl))
+			tempDir := filepath.Join(s.config.OutputPath, "temp")
 
-		// 创建基于规格的目录结构
-		finalDir, err := s.fileManager.CreateSpecBasedDirectories(order, spec, aspectCategory)
-		if err != nil {
-			logx.Errorf("创建目录失败: %v", err)
-			// 删除临时文件
-			os.Remove(tempPath)
-			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
-			failCount++
-			continue
+			// 确保临时目录存在
+			if err := os.MkdirAll(tempDir, 0755); err != nil {
+				logx.Errorf("创建临时目录失败: %v", err)
+				photoFailCount++
+				continue
+			}
+			tempPath := filepath.Join(tempDir, tempFileName)
+
+			logx.Infof("开始下载照片到临时位置: ID: %d, 副本: %d, 临时路径: %s", photo.Id, copyIndex, tempPath)
+
+			if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
+				logx.Errorf("照片下载失败, 照片ID: %d, 副本: %d, URL: %s, 错误: %v", photo.Id, copyIndex, photo.OriginUrl, err)
+				photoFailCount++
+				continue
+			}
+
+			var finalDir string
+
+			if copyIndex == 1 {
+				// 第一次下载，需要分析图片
+				width, height, err := s.imageAnalyzer.GetImageDimensions(tempPath)
+				if err != nil {
+					// 这种情况现在应该很少发生，因为image_analyzer会返回默认尺寸
+					logx.Errorf("获取图片尺寸失败, 照片ID: %d, 错误: %v", photo.Id, err)
+					// 删除临时文件
+					os.Remove(tempPath)
+					photoFailCount++
+					continue
+				}
+
+				// 计算宽高比并确定分类
+				ratio := s.imageAnalyzer.CalculateAspectRatio(width, height)
+				aspectCategory := s.imageAnalyzer.GetAspectRatioCategory(ratio)
+
+				// 检查是否使用了默认尺寸
+				if width == 4000 && height == 3000 {
+					logx.Infof("照片尺寸: %dx%d (使用默认尺寸), 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
+				} else {
+					logx.Infof("照片尺寸: %dx%d, 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
+				}
+
+				// 创建基于规格的目录结构
+				finalDir, err = s.fileManager.CreateSpecBasedDirectories(order, spec, aspectCategory)
+				if err != nil {
+					logx.Errorf("创建目录失败: %v", err)
+					// 删除临时文件
+					os.Remove(tempPath)
+					photoFailCount++
+					continue
+				}
+
+				// 保存分析结果供后续副本使用
+				firstAnalysisResult.width = width
+				firstAnalysisResult.height = height
+				firstAnalysisResult.ratio = ratio
+				firstAnalysisResult.aspectCategory = aspectCategory
+				firstAnalysisResult.finalDir = finalDir
+			} else {
+				// 后续副本，复用第一次的分析结果
+				finalDir = firstAnalysisResult.finalDir
+			}
+
+			// 提取原始文件扩展名
+			originalExt := s.getFileExtension(photo.OriginUrl)
+			if originalExt == "" {
+				originalExt = ".jpg" // 默认扩展名
+			}
+
+			// 根据副本编号生成简化的数字文件名
+			var fileName string
+			if copyIndex == 1 {
+				// 第一张：{序号}.jpg
+				fileName = fmt.Sprintf("%d%s", photoIndex, originalExt)
+			} else {
+				// 副本：{序号}_copy{副本编号-1}.jpg (副本从copy1开始)
+				fileName = fmt.Sprintf("%d_copy%d%s", photoIndex, copyIndex-1, originalExt)
+			}
+
+			// 确保文件名唯一性，避免同一目录下的重复文件名
+			finalPath := filepath.Join(finalDir, fileName)
+			uniqueKey := fmt.Sprintf("%s/%s", finalDir, fileName)
+			counter := 1
+			for usedFileNames[uniqueKey] {
+				if copyIndex == 1 {
+					fileName = fmt.Sprintf("%d_%d%s", photoIndex, counter, originalExt)
+				} else {
+					fileName = fmt.Sprintf("%d_copy%d_%d%s", photoIndex, copyIndex-1, counter, originalExt)
+				}
+				finalPath = filepath.Join(finalDir, fileName)
+				uniqueKey = fmt.Sprintf("%s/%s", finalDir, fileName)
+				counter++
+			}
+			usedFileNames[uniqueKey] = true
+
+			// 移动临时文件到最终位置
+			if err := s.moveFile(tempPath, finalPath); err != nil {
+				logx.Errorf("移动文件到最终位置失败: %v", err)
+				// 删除临时文件
+				os.Remove(tempPath)
+				photoFailCount++
+				continue
+			}
+
+			logx.Infof("照片副本下载成功: ID: %d, 序号: %d, 副本: %d/%d, 文件名: %s, 保存路径: %s",
+				photo.Id, photoIndex, copyIndex, downloadCount, fileName, finalPath)
+			photoSuccessCount++
 		}
 
-		// 为该目录生成下一个文件序号
-		dirCounters[finalDir]++
-		fileCounter := dirCounters[finalDir]
-
-		// 提取原始文件扩展名
-		originalExt := s.getFileExtension(photo.OriginUrl)
-		if originalExt == "" {
-			originalExt = ".jpg" // 默认扩展名
+		// 更新照片状态
+		if photoFailCount == 0 {
+			// 所有副本都下载成功
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusSuccess, "")
+			logx.Infof("照片所有副本下载完成: ID: %d, 成功: %d/%d", photo.Id, photoSuccessCount, downloadCount)
+		} else if photoSuccessCount > 0 {
+			// 部分成功
+			errorMsg := fmt.Sprintf("部分下载成功: 成功 %d 个，失败 %d 个", photoSuccessCount, photoFailCount)
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, errorMsg)
+			logx.Errorf("照片部分下载失败: ID: %d, %s", photo.Id, errorMsg)
+		} else {
+			// 全部失败
+			errorMsg := fmt.Sprintf("所有副本下载失败: 失败 %d 个", photoFailCount)
+			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, errorMsg)
+			logx.Errorf("照片全部下载失败: ID: %d, %s", photo.Id, errorMsg)
 		}
 
-		// 生成简单的数字文件名
-		fileName := fmt.Sprintf("%d%s", fileCounter, originalExt)
-		finalPath := filepath.Join(finalDir, fileName)
-
-		// 移动临时文件到最终位置
-		if err := s.moveFile(tempPath, finalPath); err != nil {
-			logx.Errorf("移动文件到最终位置失败: %v", err)
-			// 删除临时文件
-			os.Remove(tempPath)
-			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, err.Error())
-			failCount++
-			continue
-		}
-
-		logx.Infof("照片下载成功: ID: %d, 保存路径: %s, 文件名: %s, 尺寸: %dx%d, 比例: %s",
-			photo.Id, finalPath, fileName, width, height, aspectCategory)
-		s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusSuccess, "")
-		successCount++
+		// 累计总体统计
+		successCount += photoSuccessCount
+		failCount += photoFailCount
 	}
 
 	return successCount, failCount
@@ -241,6 +321,42 @@ func (s *PhotoSyncer) getFileExtension(url string) string {
 	}
 
 	return ""
+}
+
+// getFileNameWithoutExt 从URL中提取文件名（不含扩展名）
+func (s *PhotoSyncer) getFileNameWithoutExt(url string) string {
+	// 先去掉URL参数
+	if idx := strings.Index(url, "?"); idx != -1 {
+		url = url[:idx]
+	}
+
+	// 提取文件名
+	fileName := filepath.Base(url)
+	if fileName == "" || fileName == "." || fileName == "/" {
+		return ""
+	}
+
+	// 去掉扩展名
+	ext := filepath.Ext(fileName)
+	if ext != "" {
+		fileName = fileName[:len(fileName)-len(ext)]
+	}
+
+	// 清理文件名，移除不安全的字符
+	fileName = strings.ReplaceAll(fileName, " ", "_")
+	fileName = strings.ReplaceAll(fileName, "(", "_")
+	fileName = strings.ReplaceAll(fileName, ")", "_")
+	fileName = strings.ReplaceAll(fileName, "[", "_")
+	fileName = strings.ReplaceAll(fileName, "]", "_")
+	fileName = strings.ReplaceAll(fileName, "{", "_")
+	fileName = strings.ReplaceAll(fileName, "}", "_")
+	fileName = strings.ReplaceAll(fileName, "#", "_")
+	fileName = strings.ReplaceAll(fileName, "%", "_")
+	fileName = strings.ReplaceAll(fileName, "&", "_")
+	fileName = strings.ReplaceAll(fileName, "?", "_")
+	fileName = strings.ReplaceAll(fileName, "!", "_")
+
+	return fileName
 }
 
 // updatePhotoStatus 更新照片状态
