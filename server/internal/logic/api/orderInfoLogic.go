@@ -36,7 +36,7 @@ func (l *OrderInfoLogic) OrderInfo(req *types.OrderInfoRequest) (resp *types.Ord
 	order, err := l.orderModel.FindOneByOrderSn(l.ctx, req.OrderSn)
 	if err != nil {
 		logx.Errorf("查询订单失败, order_sn: %s, error: %v", req.OrderSn, err)
-		return resp, errors.New(-1, "订单不存在")
+		return resp, errors.New(2001, "订单不存在")
 	}
 
 	logx.Infof("订单信息查询成功, order_id: %d, order_sn: %s", order.Id, order.OrderSn)
@@ -45,7 +45,7 @@ func (l *OrderInfoLogic) OrderInfo(req *types.OrderInfoRequest) (resp *types.Ord
 	photos, err := l.photoModel.FindByOrderId(l.ctx, order.Id)
 	if err != nil {
 		logx.Errorf("查询订单照片失败, order_id: %d, error: %v", order.Id, err)
-		return resp, errors.New(-1, "获取照片信息失败")
+		return resp, errors.New(2002, "获取照片信息失败")
 	}
 
 	logx.Infof("订单照片查询成功, order_id: %d, photo_count: %d", order.Id, len(photos))
