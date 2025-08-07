@@ -6,14 +6,12 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/zeromicro/go-zero/core/logx"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/aliyun/aliyun-oss-go-sdk/oss"
-	"github.com/zeromicro/go-zero/core/logx"
 
 	"server/internal/svc"
 	"server/internal/types"
@@ -38,6 +36,9 @@ func NewUploadOssLogic(ctx context.Context, svcCtx *svc.ServiceContext, r *http.
 }
 
 func (l *UploadOssLogic) UploadOss() (resp *types.UploadResponse, err error) {
+	// 获取prefix参数
+	prefix := l.request.FormValue("prefix")
+
 	file, handler, err := l.request.FormFile("file")
 	if err != nil {
 		logx.Errorf("GetFileError:%v", err)
@@ -86,9 +87,19 @@ func (l *UploadOssLogic) UploadOss() (resp *types.UploadResponse, err error) {
 
 	// 生成文件名：原始文件名_{sha1}.文件后缀
 	nameWithoutExt := strings.TrimSuffix(handler.Filename, ext)
-	objectName := fmt.Sprintf("%s_%s%s", nameWithoutExt, fileSha1Sum, ext)
+	fileName := fmt.Sprintf("%s_%s%s", nameWithoutExt, fileSha1Sum, ext)
 
-	logx.Infof("上传文件到OSS: %s -> %s", handler.Filename, objectName)
+	// 构建完整的对象名称，包含prefix路径
+	var objectName string
+	if prefix != "" {
+		// 确保prefix不以/开头和结尾
+		prefix = strings.Trim(prefix, "/")
+		objectName = fmt.Sprintf("%s/%s", prefix, fileName)
+	} else {
+		objectName = fileName
+	}
+
+	logx.Infof("上传文件到OSS: %s -> %s (prefix: %s)", handler.Filename, objectName, prefix)
 
 	// 上传文件到OSS
 	err = bucket.PutObject(objectName, bytes.NewReader(fileContent),
@@ -102,28 +113,9 @@ func (l *UploadOssLogic) UploadOss() (resp *types.UploadResponse, err error) {
 	var fileURL string
 
 	// 判断是否为私有存储桶
-	if l.svcCtx.Config.AliyunOSS.IsPrivate {
-		// 私有存储桶，生成带签名的临时访问URL
-		expireTime := time.Duration(l.svcCtx.Config.AliyunOSS.SignedUrlExpire) * time.Second
-		signedURL, err := bucket.SignURL(objectName, oss.HTTPGet, int64(expireTime.Seconds()))
-		if err != nil {
-			logx.Errorf("生成签名URL失败: %v", err)
-			// 如果签名URL生成失败，使用直接URL
-			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.ProxyDomain, objectName)
-		} else {
-			fileURL = signedURL
-			logx.Infof("生成私有存储桶签名URL，过期时间: %d秒", l.svcCtx.Config.AliyunOSS.SignedUrlExpire)
-		}
-	} else {
-		// 公共存储桶，直接生成访问URL
-		if l.svcCtx.Config.AliyunOSS.CDNDomain != "" {
-			// 优先使用CDN域名
-			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.CDNDomain, objectName)
-		} else {
-			// 使用代理域名
-			fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.ProxyDomain, objectName)
-		}
-	}
+	// 公共存储桶，直接生成访问URL
+	// 使用代理域名
+	fileURL = fmt.Sprintf("%s://%s/%s", l.svcCtx.Config.AliyunOSS.Schema, l.svcCtx.Config.AliyunOSS.ProxyDomain, objectName)
 
 	logx.Infof("文件上传成功，访问URL: %s", fileURL)
 
