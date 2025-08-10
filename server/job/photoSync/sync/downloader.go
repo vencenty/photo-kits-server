@@ -2,8 +2,10 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,100 +18,176 @@ import (
 
 // PhotoDownloader 照片下载器
 type PhotoDownloader struct {
-	downloadTimeout time.Duration
+	baseTimeout    time.Duration
+	maxTimeout     time.Duration
+	maxRetries     int
+	retryBaseDelay time.Duration
 }
 
 // NewPhotoDownloader 创建照片下载器
-func NewPhotoDownloader(timeoutSeconds int) *PhotoDownloader {
+func NewPhotoDownloader(baseTimeoutSeconds int, maxTimeoutSeconds int, maxRetries int, retryBaseDelaySeconds int) *PhotoDownloader {
 	return &PhotoDownloader{
-		downloadTimeout: time.Duration(timeoutSeconds) * time.Second,
+		baseTimeout:    time.Duration(baseTimeoutSeconds) * time.Second,
+		maxTimeout:     time.Duration(maxTimeoutSeconds) * time.Second,
+		maxRetries:     maxRetries,
+		retryBaseDelay: time.Duration(retryBaseDelaySeconds) * time.Second,
 	}
 }
 
-// DownloadPhoto 下载照片
+// DownloadPhoto 下载照片（带超时自适应重试，仅在失败时输出错误日志）
 func (pd *PhotoDownloader) DownloadPhoto(ctx context.Context, photoUrl, destPath string) error {
-	logx.Infof("开始下载照片: URL=%s, 目标路径=%s, 超时时间=%v", photoUrl, destPath, pd.downloadTimeout)
-
-	// 解析URL
+	// 解析并校验 URL
 	parsedURL, err := url.Parse(photoUrl)
 	if err != nil {
-		logx.Errorf("解析URL失败: %s, 错误: %v", photoUrl, err)
+		logx.Errorf("下载失败 url=%s, 原因=解析URL失败: %v", photoUrl, err)
 		return fmt.Errorf("解析URL失败: %v", err)
 	}
-
-	// 确保URL是绝对URL
 	if !parsedURL.IsAbs() {
-		logx.Errorf("URL不是绝对URL: %s", photoUrl)
+		logx.Errorf("下载失败 url=%s, 原因=URL不是绝对URL", photoUrl)
 		return fmt.Errorf("URL不是绝对URL: %s", photoUrl)
 	}
 
-	// 创建HTTP客户端，设置超时
-	client := &http.Client{
-		Timeout: pd.downloadTimeout,
+	// http.Client 不设全局超时，使用每次请求的 context 控制
+	client := &http.Client{}
+
+	var lastErr error
+	attempts := pd.maxRetries + 1
+	for attempt := 0; attempt < attempts; attempt++ {
+		// 计算本次尝试的超时时间：base * 2^attempt，上限为 maxTimeout
+		attemptTimeout := pd.baseTimeout * time.Duration(1<<attempt)
+		if attemptTimeout > pd.maxTimeout {
+			attemptTimeout = pd.maxTimeout
+		}
+
+		// 使用带超时的子上下文，避免无限期阻塞大文件下载
+		reqCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, photoUrl, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("创建HTTP请求失败: %v", err)
+			logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+			// 创建请求失败无需重试过多
+			break
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			// 判断是否为超时/上下文截止，若可重试则退避后继续
+			if isTimeoutLikeError(err) && attempt < attempts-1 {
+				backoff := pd.retryBaseDelay * time.Duration(1<<attempt)
+				if backoff > 0 {
+					time.Sleep(backoff)
+				}
+				cancel()
+				continue
+			}
+			logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, err)
+			cancel()
+			break
+		}
+
+		// 确保响应体关闭
+		func() {
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				lastErr = fmt.Errorf("HTTP状态码=%d", resp.StatusCode)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 确保目标目录存在
+			destDir := filepath.Dir(destPath)
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				lastErr = fmt.Errorf("创建目标目录失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 写入到临时文件，再原子重命名
+			tempPath := destPath + ".tmp"
+			out, err := os.Create(tempPath)
+			if err != nil {
+				lastErr = fmt.Errorf("创建临时文件失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+			// 复制响应体到文件
+			if _, err = io.Copy(out, resp.Body); err != nil {
+				out.Close()
+				os.Remove(tempPath)
+				lastErr = fmt.Errorf("保存文件内容失败: %v", err)
+				// 若为可重试超时类错误，尝试重试
+				if isTimeoutLikeError(err) && attempt < attempts-1 {
+					backoff := pd.retryBaseDelay * time.Duration(1<<attempt)
+					if backoff > 0 {
+						time.Sleep(backoff)
+					}
+					return
+				}
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+			// 关闭并重命名
+			out.Close()
+			if err := os.Rename(tempPath, destPath); err != nil {
+				os.Remove(tempPath)
+				lastErr = fmt.Errorf("重命名文件失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 成功则清空 lastErr
+			lastErr = nil
+		}()
+
+		// 结束本轮超时上下文
+		cancel()
+
+		if lastErr == nil {
+			return nil
+		}
+
+		// 若可重试，执行退避
+		if attempt < attempts-1 {
+			if isTimeoutLikeError(lastErr) {
+				backoff := pd.retryBaseDelay * time.Duration(1<<attempt)
+				if backoff > 0 {
+					time.Sleep(backoff)
+				}
+				continue
+			}
+			// 对非超时错误也仅重试有限次
+			backoff := pd.retryBaseDelay * time.Duration(1<<attempt)
+			if backoff > 0 {
+				time.Sleep(backoff)
+			}
+			continue
+		}
 	}
 
-	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, photoUrl, nil)
-	if err != nil {
-		logx.Errorf("创建HTTP请求失败: %s, 错误: %v", photoUrl, err)
-		return fmt.Errorf("创建HTTP请求失败: %v", err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("未知错误")
 	}
+	return lastErr
+}
 
-	// 发送请求
-	logx.Infof("发送HTTP请求: %s", photoUrl)
-	resp, err := client.Do(req)
-	if err != nil {
-		logx.Errorf("HTTP请求失败: %s, 错误: %v", photoUrl, err)
-		return fmt.Errorf("HTTP请求失败: %v", err)
+// isTimeoutLikeError 判断错误是否为超时/上下文截止
+func isTimeoutLikeError(err error) bool {
+	if err == nil {
+		return false
 	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	logx.Infof("HTTP响应状态: %d, URL: %s", resp.StatusCode, photoUrl)
-	if resp.StatusCode != http.StatusOK {
-		logx.Errorf("HTTP响应状态码不是200: %d, URL: %s", resp.StatusCode, photoUrl)
-		return fmt.Errorf("HTTP响应状态码不是200: %d", resp.StatusCode)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
-
-	// 确保目标目录存在
-	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		logx.Errorf("创建目标目录失败: %s, 错误: %v", destDir, err)
-		return fmt.Errorf("创建目标目录失败: %v", err)
+	// net.Error 接口的 Timeout
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return true
 	}
-
-	// 创建临时文件
-	tempPath := destPath + ".tmp"
-	logx.Infof("创建临时文件: %s", tempPath)
-	out, err := os.Create(tempPath)
-	if err != nil {
-		logx.Errorf("创建临时文件失败: %s, 错误: %v", tempPath, err)
-		return fmt.Errorf("创建临时文件失败: %v", err)
-	}
-	defer out.Close()
-
-	// 复制内容
-	logx.Infof("开始复制文件内容: %s", tempPath)
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		os.Remove(tempPath)
-		logx.Errorf("保存文件内容失败: %s, 错误: %v", tempPath, err)
-		return fmt.Errorf("保存文件内容失败: %v", err)
-	}
-
-	// 关闭文件
-	out.Close()
-
-	// 原子性重命名，避免部分写入的文件
-	logx.Infof("重命名文件: %s -> %s", tempPath, destPath)
-	if err := os.Rename(tempPath, destPath); err != nil {
-		os.Remove(tempPath)
-		logx.Errorf("重命名文件失败: %s -> %s, 错误: %v", tempPath, destPath, err)
-		return fmt.Errorf("重命名文件失败: %v", err)
-	}
-
-	logx.Infof("照片下载成功: %s", destPath)
-	return nil
+	// 常见字符串匹配兜底
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") || strings.Contains(msg, "context deadline exceeded")
 }
 
 // GetCleanFileName 从URL中提取不含查询参数的文件名

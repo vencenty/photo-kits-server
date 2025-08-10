@@ -71,8 +71,8 @@ func (fm *FileManager) CreateSpecBasedDirectories(order *model.Order, spec, aspe
 		return "", fmt.Errorf("创建比例目录失败: %v", err)
 	}
 
-	logx.Infof("为订单 %s 创建目录: %s (规格: %s, 比例: %s, 基于时间: %s)",
-		order.OrderSn, finalDir, spec, aspectCategory, baseTime.Format("2006-01-02 15:04:05"))
+	//logx.Infof("为订单 %s 创建目录: %s (规格: %s, 比例: %s, 基于时间: %s)",
+	//	order.OrderSn, finalDir, spec, aspectCategory, baseTime.Format("2006-01-02 15:04:05"))
 
 	return finalDir, nil
 }

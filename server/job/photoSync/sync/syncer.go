@@ -33,15 +33,19 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 		photoModel:    model.NewPhotoModel(db),
 		orderModel:    model.NewOrderModel(db),
 		imageAnalyzer: NewImageAnalyzer(),
-		downloader:    NewPhotoDownloader(syncConfig.DownloadTimeout),
-		fileManager:   NewFileManager(syncConfig.OutputPath),
+		downloader: NewPhotoDownloader(
+			syncConfig.DownloadTimeout,
+			syncConfig.MaxDownloadTimeout,
+			syncConfig.MaxRetries,
+			syncConfig.RetryBaseDelay,
+		),
+		fileManager: NewFileManager(syncConfig.OutputPath),
 	}
 }
 
 // SyncPhotos 执行照片同步操作，获取一条status=0或status=-1的订单并下载照片
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
-	logx.Info("开始同步照片...")
-	logx.Infof("输出根目录：%s", s.config.OutputPath)
+	logx.Info("开始同步照片")
 
 	// 检查输出目录是否存在，不存在则创建
 	if err := s.fileManager.EnsureOutputDirectory(); err != nil {
@@ -65,8 +69,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return nil
 	}
 
-	logx.Infof("===== 开始处理订单 =====")
-	logx.Infof("订单信息: ID: %d, 订单号: %s, 收货人: %s, 重试次数: %d", order.Id, order.OrderSn, order.Receiver, order.RetryCount)
+	logx.Infof("处理订单: id=%d, sn=%s, receiver=%s, retry=%d", order.Id, order.OrderSn, order.Receiver, order.RetryCount)
 
 	// 清理订单之前的旧文件
 	if err := s.fileManager.CleanOrderFiles(order); err != nil {
@@ -82,9 +85,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
 	}
 
-	logx.Infof("订单处理完成, 订单ID: %d, 订单号: %s", order.Id, order.OrderSn)
-	logx.Infof("===== 订单处理结束 =====")
-
+	logx.Infof("订单处理完成: id=%d, sn=%s", order.Id, order.OrderSn)
 	logx.Info("照片同步完成")
 	return nil
 }
@@ -119,7 +120,7 @@ func (s *PhotoSyncer) processOrderPhotos(ctx context.Context, order *model.Order
 		return 0, 0
 	}
 
-	logx.Infof("订单 %d 有 %d 张照片需要处理", order.Id, len(photos))
+	logx.Infof("订单 %d 照片数量: %d", order.Id, len(photos))
 
 	// 按规格和比例分组处理照片
 	successCount, failCount = s.downloadAllPhotos(ctx, photos, order)
@@ -136,8 +137,9 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 	usedFileNames := make(map[string]bool)
 	// 照片序号计数器，从1开始
 	photoIndex := 0
+	totalPhotos := len(photos)
 
-	for i, photo := range photos {
+	for _, photo := range photos {
 		photoIndex++ // 为每张照片分配一个序号
 		spec := photo.Spec
 		if spec == "" {
@@ -150,8 +152,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			downloadCount = 1
 		}
 
-		logx.Infof("处理照片 %d/%d: ID: %d, 规格: %s, 需要下载数量: %d, URL: %s",
-			i+1, len(photos), photo.Id, spec, downloadCount, photo.OriginUrl)
+		// 精简日志：不在成功路径逐条打印
 
 		// 记录该照片的成功和失败次数
 		photoSuccessCount := 0
@@ -167,8 +168,8 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		}
 
 		// 根据num字段循环下载指定数量的文件
+		var lastErrMsg string
 		for copyIndex := 1; copyIndex <= int(downloadCount); copyIndex++ {
-			logx.Infof("下载照片副本 %d/%d: 照片ID: %d", copyIndex, downloadCount, photo.Id)
 
 			// 下载照片到临时位置以获取尺寸信息
 			tempFileName := fmt.Sprintf("temp_%d_%d_%s", photo.Id, copyIndex, s.downloader.GetCleanFileName(photo.OriginUrl))
@@ -182,10 +183,9 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			}
 			tempPath := filepath.Join(tempDir, tempFileName)
 
-			logx.Infof("开始下载照片到临时位置: ID: %d, 副本: %d, 临时路径: %s", photo.Id, copyIndex, tempPath)
-
 			if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
-				logx.Errorf("照片下载失败, 照片ID: %d, 副本: %d, URL: %s, 错误: %v", photo.Id, copyIndex, photo.OriginUrl, err)
+				logx.Errorf("下载失败 url=%s, photoId=%d, copy=%d, err=%v", photo.OriginUrl, photo.Id, copyIndex, err)
+				lastErrMsg = err.Error()
 				photoFailCount++
 				continue
 			}
@@ -209,11 +209,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				aspectCategory := s.imageAnalyzer.GetAspectRatioCategory(ratio)
 
 				// 检查是否使用了默认尺寸
-				if width == 4000 && height == 3000 {
-					logx.Infof("照片尺寸: %dx%d (使用默认尺寸), 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
-				} else {
-					logx.Infof("照片尺寸: %dx%d, 宽高比: %.3f, 分类: %s", width, height, ratio, aspectCategory)
-				}
+				// 精简尺寸日志，避免过多输出
 
 				// 创建基于规格的目录结构
 				finalDir, err = s.fileManager.CreateSpecBasedDirectories(order, spec, aspectCategory)
@@ -277,8 +273,8 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				continue
 			}
 
-			logx.Infof("照片副本下载成功: ID: %d, 序号: %d, 副本: %d/%d, 文件名: %s, 保存路径: %s",
-				photo.Id, photoIndex, copyIndex, downloadCount, fileName, finalPath)
+			// 成功打印一条精简日志：url + 总体进度 + 副本进度
+			logx.Infof("下载成功 url=%s, 进度=%d/%d, 副本=%d/%d", photo.OriginUrl, photoIndex, totalPhotos, copyIndex, downloadCount)
 			photoSuccessCount++
 		}
 
@@ -286,17 +282,17 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		if photoFailCount == 0 {
 			// 所有副本都下载成功
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusSuccess, "")
-			logx.Infof("照片所有副本下载完成: ID: %d, 成功: %d/%d", photo.Id, photoSuccessCount, downloadCount)
+			// 精简成功日志
 		} else if photoSuccessCount > 0 {
 			// 部分成功
-			errorMsg := fmt.Sprintf("部分下载成功: 成功 %d 个，失败 %d 个", photoSuccessCount, photoFailCount)
+			errorMsg := fmt.Sprintf("部分下载成功: 成功 %d 个，失败 %d 个, url=%s, lastErr=%s", photoSuccessCount, photoFailCount, photo.OriginUrl, lastErrMsg)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, errorMsg)
-			logx.Errorf("照片部分下载失败: ID: %d, %s", photo.Id, errorMsg)
+			logx.Errorf("照片部分下载失败: ID=%d, %s", photo.Id, errorMsg)
 		} else {
 			// 全部失败
-			errorMsg := fmt.Sprintf("所有副本下载失败: 失败 %d 个", photoFailCount)
+			errorMsg := fmt.Sprintf("所有副本下载失败: 失败 %d 个, url=%s, lastErr=%s", photoFailCount, photo.OriginUrl, lastErrMsg)
 			s.updatePhotoStatus(ctx, photo.Id, model.PhotoStatusFailed, errorMsg)
-			logx.Errorf("照片全部下载失败: ID: %d, %s", photo.Id, errorMsg)
+			logx.Errorf("照片全部下载失败: ID=%d, %s", photo.Id, errorMsg)
 		}
 
 		// 累计总体统计
@@ -361,7 +357,20 @@ func (s *PhotoSyncer) getFileNameWithoutExt(url string) string {
 
 // updatePhotoStatus 更新照片状态
 func (s *PhotoSyncer) updatePhotoStatus(ctx context.Context, photoId uint64, status int64, errMsg string) {
-	if err := s.photoModel.UpdateStatus(ctx, photoId, status, errMsg); err != nil {
+	// 失败时将错误累计到 error 字段（追加一行），成功则清空
+	finalErrMsg := errMsg
+	if status != model.PhotoStatusSuccess {
+		// 查询已有错误并追加
+		if p, findErr := s.photoModel.FindOne(ctx, photoId); findErr == nil && p != nil {
+			if strings.TrimSpace(p.Error) != "" {
+				finalErrMsg = p.Error + "\n" + errMsg
+			}
+		}
+	} else {
+		finalErrMsg = ""
+	}
+
+	if err := s.photoModel.UpdateStatus(ctx, photoId, status, finalErrMsg); err != nil {
 		logx.Errorf("更新照片状态失败, 照片ID: %d, 错误: %v", photoId, err)
 	}
 }
