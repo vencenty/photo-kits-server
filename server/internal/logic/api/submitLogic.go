@@ -6,7 +6,6 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
-	"github.com/zeromicro/x/errors"
 	"net/http"
 	"net/url"
 	"server/internal/svc"
@@ -50,9 +49,9 @@ func (l *SubmitLogic) Submit(req *types.SubmitRequest) (resp *types.SubmitRespon
 	}
 
 	// 如果订单存在，并且订单已经进入处理中状态，那么不允许用户重新上传
-	if order != nil && order.Status == model.OrderStatusProcessing {
-		return resp, errors.New(-1, "订单已经进入处理流程，无法重新上传图片，如有疑问请联系田田洗照片处理")
-	}
+	//if order != nil && order.Status == model.OrderStatusProcessing {
+	//	return resp, errors.New(-1, "订单已经进入处理流程，无法重新上传图片，如有疑问请联系田田洗照片处理")
+	//}
 
 	// 没有订单的话创建订单
 	if order == nil {
