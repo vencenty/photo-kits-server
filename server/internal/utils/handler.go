@@ -17,7 +17,7 @@ type Response struct {
 // Success 成功响应
 func Success(data interface{}) *Response {
 	return &Response{
-		Code: 200,
+		Code: 0,
 		Msg:  "success",
 		Data: data,
 	}
