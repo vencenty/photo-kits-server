@@ -1,16 +1,17 @@
 package api
 
 import (
-  "net/http"
-  "server/internal/logic/api"
+	"net/http"
 
-  "server/internal/svc"
-  "server/internal/utils"
+	"server/internal/logic/api"
+	"server/internal/svc"
+	"server/internal/utils"
 )
 
 func PingHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-	return utils.WrapHandler(func(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		l := api.NewPingLogic(r.Context(), svcCtx)
-		return l.Ping()
-	})
+		resp, err := l.Ping()
+		utils.HttpResult(r, w, resp, err)
+	}
 }

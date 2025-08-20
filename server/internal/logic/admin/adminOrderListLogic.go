@@ -25,6 +25,7 @@ func NewAdminOrderListLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Ad
 }
 
 func (l *AdminOrderListLogic) AdminOrderList(req *types.OrderListRequest) (resp *types.OrderListResponse, err error) {
+	logx.Infof("收到查询参数: OrderSn='%s', Receiver='%s', Status=%d", req.OrderSn, req.Receiver, req.Status)
 	// 设置默认分页参数
 	if req.Page <= 0 {
 		req.Page = 1

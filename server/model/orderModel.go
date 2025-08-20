@@ -147,6 +147,7 @@ func (m *customOrderModel) FindOrdersWithPagination(ctx context.Context, orderSn
 	// 构建查询条件
 	var conditions []string
 	var args []interface{}
+	args = args[:0]
 
 	if orderSn != "" {
 		conditions = append(conditions, "`order_sn` LIKE ?")

@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 
+	"github.com/zeromicro/go-zero/rest/httpx"
 	"server/internal/logic/admin"
 	"server/internal/svc"
 	"server/internal/types"
@@ -10,8 +11,15 @@ import (
 )
 
 func AdminOrderInfoHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-	return utils.WrapHandlerWithRequest(func(w http.ResponseWriter, r *http.Request, req interface{}) (interface{}, error) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req types.OrderInfoRequest
+		if err := httpx.Parse(r, &req); err != nil {
+			utils.HttpResult(r, w, nil, err)
+			return
+		}
+
 		l := admin.NewAdminOrderInfoLogic(r.Context(), svcCtx)
-		return l.AdminOrderInfo(req.(*types.OrderInfoRequest))
-	}, &types.OrderInfoRequest{})
+		resp, err := l.AdminOrderInfo(&req)
+		utils.HttpResult(r, w, resp, err)
+	}
 }

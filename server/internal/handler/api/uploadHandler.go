@@ -1,16 +1,17 @@
 package api
 
 import (
-  "net/http"
-  "server/internal/logic/api"
+	"net/http"
 
-  "server/internal/svc"
-  "server/internal/utils"
+	"server/internal/logic/api"
+	"server/internal/svc"
+	"server/internal/utils"
 )
 
 func UploadHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-	return utils.WrapHandler(func(w http.ResponseWriter, r *http.Request) (interface{}, error) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		l := api.NewUploadLogic(r.Context(), svcCtx, r, w)
-		return l.Upload()
-	})
+		resp, err := l.Upload()
+		utils.HttpResult(r, w, resp, err)
+	}
 }

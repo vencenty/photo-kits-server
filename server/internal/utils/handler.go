@@ -3,43 +3,49 @@ package utils
 import (
 	"net/http"
 
-	xhttp "github.com/zeromicro/x/http"
+	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
-// HandlerFunc 定义通用的handler函数类型
-type HandlerFunc func(w http.ResponseWriter, r *http.Request) (interface{}, error)
-
-// RequestParser 定义请求解析接口
-type RequestParser interface {
-	Parse(r *http.Request) error
+// 统一响应格式
+type Response struct {
+	Code int         `json:"code"`
+	Msg  string      `json:"msg"`
+	Data interface{} `json:"data,omitempty"`
 }
 
-// WrapHandler 包装handler，统一使用xhttp.JsonBaseResponseCtx返回响应
-func WrapHandler(handler HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		resp, err := handler(w, r)
-		if err != nil {
-			xhttp.JsonBaseResponseCtx(r.Context(), w, err)
-		} else {
-			xhttp.JsonBaseResponseCtx(r.Context(), w, resp)
-		}
+// Success 成功响应
+func Success(data interface{}) *Response {
+	return &Response{
+		Code: 200,
+		Msg:  "success",
+		Data: data,
 	}
 }
 
-// WrapHandlerWithRequest 包装带请求参数的handler
-func WrapHandlerWithRequest(handler func(w http.ResponseWriter, r *http.Request, req interface{}) (interface{}, error), reqType interface{}) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := httpx.Parse(r, reqType); err != nil {
-			xhttp.JsonBaseResponseCtx(r.Context(), w, err)
-			return
-		}
-
-		resp, err := handler(w, r, reqType)
-		if err != nil {
-			xhttp.JsonBaseResponseCtx(r.Context(), w, err)
-		} else {
-			xhttp.JsonBaseResponseCtx(r.Context(), w, resp)
-		}
+// Error 错误响应
+func Error(code int, msg string) *Response {
+	return &Response{
+		Code: code,
+		Msg:  msg,
 	}
-} 
+}
+
+// HttpResult 统一的HTTP响应处理函数
+func HttpResult(r *http.Request, w http.ResponseWriter, resp interface{}, err error) {
+	if err == nil {
+		// 成功返回
+		result := Success(resp)
+		httpx.WriteJson(w, http.StatusOK, result)
+	} else {
+		// 错误返回
+		errcode := 500
+		errmsg := "服务器开小差啦，稍后再来试一试"
+
+		// 这里可以根据具体的错误类型进行处理
+		// 目前先简单处理，后续可以扩展自定义错误类型
+		logx.WithContext(r.Context()).Errorf("【API-ERR】 : %+v ", err)
+
+		httpx.WriteJson(w, http.StatusBadRequest, Error(errcode, errmsg))
+	}
+}
