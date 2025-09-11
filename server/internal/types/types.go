@@ -26,7 +26,7 @@ type AdminLoginResponse struct {
 }
 
 type MetaResponse struct {
-	Data map[string]interface{} `json:"result"`
+	Data map[string]interface{} `json:"data"`
 }
 
 type OrderDeleteRequest struct {
