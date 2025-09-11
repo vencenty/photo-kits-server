@@ -76,6 +76,8 @@ type OrderItem {
 	Status int64 `json:"status"`
 	//  订单创建时间
 	CreatedAt string `json:"created_at"`
+	// 最后一次上传时间
+	UpdatedAt string `json:"updated_at"`
 }
 
 type OrderListRequest {
@@ -155,6 +157,10 @@ type AdminInfoResponse {
 	UpdatedAt string `json:"updated_at,optional"`
 }
 
+type MetaResponse {
+	Data map[string]interface{} `json:"result"`
+}
+
 type AdminInfoRequest {}
 
 // 管理员接口
@@ -203,6 +209,10 @@ service photo-api {
 	// 上传照片接口
 	@handler Upload
 	post /api/photo/upload returns (UploadResponse)
+
+	// 获取元数据接口
+	@handler Meta
+	post /api/photo/meta returns (MetaResponse)
 
 	// 上传到oss
 	@handler UploadOss

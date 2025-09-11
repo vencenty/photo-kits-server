@@ -58,6 +58,7 @@ func (l *AdminOrderListLogic) AdminOrderList(req *types.OrderListRequest) (resp 
 			Receiver:  order.Receiver,
 			Status:    order.Status,
 			CreatedAt: order.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt: order.UpdatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 
