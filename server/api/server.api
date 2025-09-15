@@ -159,6 +159,7 @@ type AdminInfoResponse {
 
 type MetaResponse {
 	Data map[string]interface{} `json:"data"`
+	Url  string                 `json:"url"`
 }
 
 type AdminInfoRequest {}
