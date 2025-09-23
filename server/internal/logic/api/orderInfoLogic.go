@@ -33,10 +33,11 @@ func (l *OrderInfoLogic) OrderInfo(req *types.OrderInfoRequest) (resp *types.Ord
 	resp = &types.OrderInfoResponse{}
 
 	// 看下能否找到订单
+	// 看下能否找到订单
 	order, err := l.orderModel.FindOneByOrderSn(l.ctx, req.OrderSn)
 	if err != nil {
 		logx.Errorf("查询订单失败, order_sn: %s, error: %v", req.OrderSn, err)
-		return resp, errors.New(2001, "订单不存在")
+		return resp, nil
 	}
 
 	logx.Infof("订单信息查询成功, order_id: %d, order_sn: %s", order.Id, order.OrderSn)
