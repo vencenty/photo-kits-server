@@ -190,6 +190,18 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				continue
 			}
 
+			// 下载成功后，检查并转换特殊格式（heic, heif, webp, jfif -> jpg）
+			convertedPath, converted, err := s.imageAnalyzer.ConvertToJPG(tempPath)
+			if err != nil {
+				logx.Errorf("格式转换失败，将使用原文件: url=%s, err=%v", photo.OriginUrl, err)
+				// 转换失败不影响继续处理，使用原文件
+				convertedPath = tempPath
+			}
+			if converted {
+				// 转换成功，更新临时文件路径
+				tempPath = convertedPath
+			}
+
 			var finalDir string
 
 			if copyIndex == 1 {
@@ -232,8 +244,8 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				finalDir = firstAnalysisResult.finalDir
 			}
 
-			// 提取原始文件扩展名
-			originalExt := s.getFileExtension(photo.OriginUrl)
+			// 提取文件扩展名（使用转换后的文件路径，如果已转换则为.jpg）
+			originalExt := filepath.Ext(tempPath)
 			if originalExt == "" {
 				originalExt = ".jpg" // 默认扩展名
 			}

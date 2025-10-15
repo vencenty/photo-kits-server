@@ -39,8 +39,9 @@ func NewImageAnalyzer() *ImageAnalyzer {
 }
 
 // GetImageDimensions 获取图片的宽高
+// 注意：在调用此方法前，应先调用 ConvertToJPG 将特殊格式转换为 JPG
 func (ia *ImageAnalyzer) GetImageDimensions(imagePath string) (width, height int, err error) {
-	// 首先尝试标准的Go image库解析
+	// 首先尝试使用 Go 标准库解析（支持 jpg, png, gif）
 	file, err := os.Open(imagePath)
 	if err != nil {
 		return 0, 0, fmt.Errorf("打开图片文件失败: %v", err)
@@ -53,50 +54,38 @@ func (ia *ImageAnalyzer) GetImageDimensions(imagePath string) (width, height int
 		return img.Width, img.Height, nil
 	}
 
-	// 如果标准库失败，检查是否为HEIC格式
-	fileExt := strings.ToLower(filepath.Ext(imagePath))
-	if fileExt == ".heic" || fileExt == ".heif" {
-		logx.Infof("检测到HEIC/HEIF格式文件，尝试使用替代方案获取尺寸: %s", imagePath)
-
-		// 尝试使用外部工具获取HEIC文件尺寸
-		width, height, err = ia.getHEICDimensions(imagePath)
-		if err == nil {
-			logx.Infof("成功通过外部工具获取HEIC尺寸: %dx%d", width, height)
-			return width, height, nil
-		}
-
-		logx.Errorf("无法获取HEIC文件尺寸: %v", err)
-
-		// HEIC解析失败，使用默认尺寸继续处理
-		logx.Infof("HEIC文件尺寸获取失败，使用默认尺寸继续处理")
-		width, height := ia.getDefaultDimensions()
+	// 如果标准库解析失败，尝试使用外部工具（ImageMagick, exiftool, ffprobe）
+	logx.Errorf("Go标准库解析图片失败: %v，尝试使用外部工具", err)
+	width, height, err = ia.getDimensionsWithExternalTools(imagePath)
+	if err == nil {
+		logx.Infof("成功通过外部工具获取图片尺寸: %dx%d", width, height)
 		return width, height, nil
 	}
 
-	// 非HEIC格式但解析失败，尝试默认尺寸
-	logx.Errorf("图片格式解析失败: %v，使用默认尺寸继续处理", err)
+	// 所有方法都失败，使用默认尺寸
+	logx.Errorf("无法获取图片尺寸: %v，使用默认尺寸继续处理", err)
 	width, height = ia.getDefaultDimensions()
 	return width, height, nil
 }
 
-// getHEICDimensions 尝试使用外部工具获取HEIC文件尺寸
-func (ia *ImageAnalyzer) getHEICDimensions(imagePath string) (width, height int, err error) {
-	// 尝试使用exiftool获取尺寸信息
-	if width, height, err := ia.tryExifTool(imagePath); err == nil {
-		return width, height, nil
-	}
-
-	// 尝试使用ImageMagick的identify命令
+// getDimensionsWithExternalTools 尝试使用外部工具获取图片尺寸（适用于各种格式）
+func (ia *ImageAnalyzer) getDimensionsWithExternalTools(imagePath string) (width, height int, err error) {
+	// 尝试使用 ImageMagick 的 identify 命令（最常用，支持最多格式）
 	if width, height, err := ia.tryImageMagick(imagePath); err == nil {
 		return width, height, nil
 	}
 
-	// 尝试使用ffprobe
+	// 尝试使用 exiftool 获取尺寸信息
+	if width, height, err := ia.tryExifTool(imagePath); err == nil {
+		return width, height, nil
+	}
+
+	// 尝试使用 ffprobe（适合多媒体文件）
 	if width, height, err := ia.tryFFProbe(imagePath); err == nil {
 		return width, height, nil
 	}
 
-	return 0, 0, fmt.Errorf("所有外部工具都无法获取HEIC文件尺寸")
+	return 0, 0, fmt.Errorf("所有外部工具都无法获取图片尺寸")
 }
 
 // tryExifTool 尝试使用exiftool获取图片尺寸
@@ -214,4 +203,80 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// ConvertToJPG 将特殊格式的图片转换为标准JPG格式
+// 支持的转换格式：heic, heif, webp, jfif
+// 如果文件已经是jpg格式，则不进行转换直接返回原路径
+// 如果需要转换，会生成一个新的jpg文件，并删除原文件，返回新文件路径
+func (ia *ImageAnalyzer) ConvertToJPG(imagePath string) (newPath string, converted bool, err error) {
+	fileExt := strings.ToLower(filepath.Ext(imagePath))
+
+	// 检查是否需要转换
+	needConvert := ia.needsConversion(fileExt)
+
+	if !needConvert {
+		// 不需要转换，直接返回原路径
+		return imagePath, false, nil
+	}
+
+	// 生成新的jpg文件路径
+	newPath = strings.TrimSuffix(imagePath, fileExt) + ".jpg"
+
+	logx.Infof("检测到特殊格式 %s，开始转换为 JPG", fileExt)
+
+	// 使用 ImageMagick 的 convert 命令转换（支持所有格式）
+	err = ia.convertWithImageMagick(imagePath, newPath)
+	if err == nil {
+		// 转换成功，删除原文件
+		if removeErr := os.Remove(imagePath); removeErr != nil {
+			logx.Errorf("删除原文件失败: %s, 错误: %v", imagePath, removeErr)
+		}
+		logx.Infof("图片格式转换成功: %s -> JPG", fileExt)
+		return newPath, true, nil
+	}
+
+	// ImageMagick 失败，记录错误但不中断流程
+	logx.Errorf("格式转换失败: %v，将使用原文件继续处理", err)
+	return imagePath, false, fmt.Errorf("ImageMagick转换失败: %v", err)
+}
+
+// needsConversion 判断文件扩展名是否需要转换为JPG
+func (ia *ImageAnalyzer) needsConversion(fileExt string) bool {
+	switch fileExt {
+	case ".heic", ".heif":
+		// Apple 的 HEIC/HEIF 格式
+		return true
+	case ".webp":
+		// Google 的 WebP 格式
+		return true
+	case ".jfif":
+		// JPEG 文件交换格式（JPEG File Interchange Format）
+		return true
+	case ".jpg", ".jpeg":
+		// 已经是标准 JPG 格式
+		return false
+	default:
+		// 其他格式保持不变（如 png, gif 等）
+		return false
+	}
+}
+
+// convertWithImageMagick 使用 ImageMagick 的 convert 命令转换图片
+// 支持的格式：heic, heif, webp, jfif, png, gif 等
+// 转换为 JPG 格式，质量设置为 95%
+func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath string) error {
+	// convert 源文件 -quality 95 目标文件.jpg
+	cmd := exec.Command("convert", srcPath, "-quality", "95", dstPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("convert命令执行失败: %v, 输出: %s", err, string(output))
+	}
+
+	// 验证输出文件是否存在
+	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+		return fmt.Errorf("转换后的文件不存在: %s", dstPath)
+	}
+
+	return nil
 }
