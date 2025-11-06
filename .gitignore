@@ -4,4 +4,4 @@ server/cmd/*
 .idea
 server/data
 server/etc/photo-api.yaml
-./assets/*
+/assets/*
