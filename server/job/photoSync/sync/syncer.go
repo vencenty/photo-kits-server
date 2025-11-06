@@ -85,6 +85,9 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
 	}
 
+	// 清理临时目录
+	s.cleanTempDirectory()
+
 	logx.Infof("订单处理完成: id=%d, sn=%s", order.Id, order.OrderSn)
 	logx.Info("照片同步完成")
 	return nil
@@ -173,7 +176,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 
 			// 下载照片到临时位置以获取尺寸信息
 			tempFileName := fmt.Sprintf("temp_%d_%d_%s", photo.Id, copyIndex, s.downloader.GetCleanFileName(photo.OriginUrl))
-			tempDir := filepath.Join(s.config.OutputPath, "temp")
+			tempDir := filepath.Join(s.config.OutputPath, ".temp")
 
 			// 确保临时目录存在
 			if err := os.MkdirAll(tempDir, 0755); err != nil {
@@ -420,4 +423,22 @@ func (s *PhotoSyncer) moveFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// cleanTempDirectory 清理临时目录
+func (s *PhotoSyncer) cleanTempDirectory() {
+	tempDir := filepath.Join(s.config.OutputPath, ".temp")
+	
+	// 检查临时目录是否存在
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		// 目录不存在，无需清理
+		return
+	}
+	
+	// 删除整个临时目录及其内容
+	if err := os.RemoveAll(tempDir); err != nil {
+		logx.Errorf("清理临时目录失败: %v", err)
+	} else {
+		logx.Info("临时目录清理完成")
+	}
 }

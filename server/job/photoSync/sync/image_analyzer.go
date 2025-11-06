@@ -264,10 +264,11 @@ func (ia *ImageAnalyzer) needsConversion(fileExt string) bool {
 
 // convertWithImageMagick 使用 ImageMagick 的 convert 命令转换图片
 // 支持的格式：heic, heif, webp, jfif, png, gif 等
-// 转换为 JPG 格式，质量设置为 95%
+// 转换为 JPG 格式，质量设置为 100% (无损质量)
 func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath string) error {
-	// convert 源文件 -quality 95 目标文件.jpg
-	cmd := exec.Command("convert", srcPath, "-quality", "95", dstPath)
+	// convert 源文件 -quality 100 目标文件.jpg
+	// 使用 quality 100 来尽量保留原图质量，减少压缩损失
+	cmd := exec.Command("convert", srcPath, "-quality", "100", dstPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("convert命令执行失败: %v, 输出: %s", err, string(output))
