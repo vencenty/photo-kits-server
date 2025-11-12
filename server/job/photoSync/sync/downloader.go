@@ -105,18 +105,24 @@ func (pd *PhotoDownloader) DownloadPhoto(ctx context.Context, photoUrl, destPath
 				return
 			}
 
-			// 写入到临时文件，再原子重命名
-			tempPath := destPath + ".tmp"
-			out, err := os.Create(tempPath)
+			// 清理可能存在的旧临时文件，避免残留数据导致问题
+			os.Remove(destPath)
+
+			out, err := os.Create(destPath)
 			if err != nil {
 				lastErr = fmt.Errorf("创建临时文件失败: %v", err)
 				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
 				return
 			}
+
+			// 获取期望的文件大小（如果服务器提供了 Content-Length）
+			expectedSize := resp.ContentLength
+
 			// 复制响应体到文件
-			if _, err = io.Copy(out, resp.Body); err != nil {
+			written, err := io.Copy(out, resp.Body)
+			if err != nil {
 				out.Close()
-				os.Remove(tempPath)
+				os.Remove(destPath)
 				lastErr = fmt.Errorf("保存文件内容失败: %v", err)
 				// 若为可重试超时类错误，尝试重试
 				if isTimeoutLikeError(err) && attempt < attempts-1 {
@@ -129,14 +135,50 @@ func (pd *PhotoDownloader) DownloadPhoto(ctx context.Context, photoUrl, destPath
 				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
 				return
 			}
-			// 关闭并重命名
-			out.Close()
-			if err := os.Rename(tempPath, destPath); err != nil {
-				os.Remove(tempPath)
-				lastErr = fmt.Errorf("重命名文件失败: %v", err)
+
+			// 验证文件大小是否与预期一致（如果服务器提供了 Content-Length）
+			if expectedSize > 0 && written != expectedSize {
+				out.Close()
+				os.Remove(destPath)
+				lastErr = fmt.Errorf("文件大小不匹配: 期望 %d 字节, 实际写入 %d 字节", expectedSize, written)
 				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
 				return
 			}
+
+			// 强制将缓冲区数据刷新到磁盘，确保数据完整性（关键步骤！）
+			if err := out.Sync(); err != nil {
+				out.Close()
+				os.Remove(destPath)
+				lastErr = fmt.Errorf("同步文件到磁盘失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 关闭文件
+			if err := out.Close(); err != nil {
+				os.Remove(destPath)
+				lastErr = fmt.Errorf("关闭文件失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 验证临时文件确实存在且大小正确
+			stat, err := os.Stat(destPath)
+			if err != nil {
+				os.Remove(destPath)
+				lastErr = fmt.Errorf("验证临时文件失败: %v", err)
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+			if stat.Size() != written {
+				os.Remove(destPath)
+				lastErr = fmt.Errorf("文件大小验证失败: 写入 %d 字节, 实际 %d 字节", written, stat.Size())
+				logx.Errorf("下载失败 url=%s, 原因=%v", photoUrl, lastErr)
+				return
+			}
+
+			// 记录成功日志，包含文件大小信息
+			logx.Infof("文件下载成功: url=%s, 大小=%.2fMB", photoUrl, float64(written)/(1024*1024))
 
 			// 成功则清空 lastErr
 			lastErr = nil

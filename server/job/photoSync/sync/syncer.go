@@ -47,7 +47,7 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	logx.Info("开始同步照片")
 
-	// 检查输出目录是否存在，不存在则创建
+	// 创建目录
 	if err := s.fileManager.EnsureOutputDirectory(); err != nil {
 		logx.Errorf("无法创建输出目录: %v", err)
 		return err
@@ -69,7 +69,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return nil
 	}
 
-	logx.Infof("处理订单: id=%d, sn=%s, receiver=%s, retry=%d", order.Id, order.OrderSn, order.Receiver, order.RetryCount)
+	logx.Infof("开始处理订单，order_sn=%s, receiver=%s, retry=%d", order.OrderSn, order.Receiver, order.RetryCount)
 
 	// 清理订单之前的旧文件
 	if err := s.fileManager.CleanOrderFiles(order); err != nil {
@@ -84,9 +84,6 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 	if err := s.updateOrderStatusByResult(ctx, order.Id, order.OrderSn, successCount, failCount); err != nil {
 		logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
 	}
-
-	// 清理临时目录
-	s.cleanTempDirectory()
 
 	logx.Infof("订单处理完成: id=%d, sn=%s", order.Id, order.OrderSn)
 	logx.Info("照片同步完成")
@@ -174,8 +171,8 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		var lastErrMsg string
 		for copyIndex := 1; copyIndex <= int(downloadCount); copyIndex++ {
 
-			// 下载照片到临时位置以获取尺寸信息
-			tempFileName := fmt.Sprintf("temp_%d_%d_%s", photo.Id, copyIndex, s.downloader.GetCleanFileName(photo.OriginUrl))
+			// 准备临时文件路径（直接使用 .tmp 后缀）
+			tempFileName := fmt.Sprintf("temp_%d_%d.tmp", photo.Id, copyIndex)
 			tempDir := filepath.Join(s.config.OutputPath, ".temp")
 
 			// 确保临时目录存在
@@ -184,26 +181,36 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				photoFailCount++
 				continue
 			}
-			tempPath := filepath.Join(tempDir, tempFileName)
 
-			if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tempPath); err != nil {
+			// 1. 下载文件到 .tmp 文件
+			tmpPath := filepath.Join(tempDir, tempFileName)
+			if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tmpPath); err != nil {
 				logx.Errorf("下载失败 url=%s, photoId=%d, copy=%d, err=%v", photo.OriginUrl, photo.Id, copyIndex, err)
 				lastErrMsg = err.Error()
 				photoFailCount++
 				continue
 			}
 
-			// 下载成功后，检查并转换特殊格式（heic, heif, webp, jfif -> jpg）
-			convertedPath, converted, err := s.imageAnalyzer.ConvertToJPG(tempPath)
+			// 2. 转换 .tmp 为 .jpg（会自动检测真实格式并转换）
+			jpgPath, err := s.imageAnalyzer.ConvertToJPG(tmpPath)
 			if err != nil {
-				logx.Errorf("格式转换失败，将使用原文件: url=%s, err=%v", photo.OriginUrl, err)
-				// 转换失败不影响继续处理，使用原文件
-				convertedPath = tempPath
+				logx.Errorf("格式检测/转换失败: url=%s, err=%v", photo.OriginUrl, err)
+				os.Remove(tmpPath)
+				lastErrMsg = err.Error()
+				photoFailCount++
+				continue
 			}
-			if converted {
-				// 转换成功，更新临时文件路径
-				tempPath = convertedPath
+
+			// 3. 验证 JPG 文件是否存在
+			if _, err := os.Stat(jpgPath); os.IsNotExist(err) {
+				logx.Errorf("JPG文件不存在: %s", jpgPath)
+				lastErrMsg = "JPG文件不存在"
+				photoFailCount++
+				continue
 			}
+
+			// 使用转换后的 JPG 文件路径
+			tempPath := jpgPath
 
 			var finalDir string
 
@@ -423,22 +430,4 @@ func (s *PhotoSyncer) moveFile(src, dst string) error {
 	}
 
 	return nil
-}
-
-// cleanTempDirectory 清理临时目录
-func (s *PhotoSyncer) cleanTempDirectory() {
-	tempDir := filepath.Join(s.config.OutputPath, ".temp")
-	
-	// 检查临时目录是否存在
-	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
-		// 目录不存在，无需清理
-		return
-	}
-	
-	// 删除整个临时目录及其内容
-	if err := os.RemoveAll(tempDir); err != nil {
-		logx.Errorf("清理临时目录失败: %v", err)
-	} else {
-		logx.Info("临时目录清理完成")
-	}
 }

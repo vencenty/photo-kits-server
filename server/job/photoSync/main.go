@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
@@ -19,6 +20,7 @@ func main() {
 	// 使用命令行参数指定的配置文件路径
 	logx.Infof("使用配置文件: %s", *configFile)
 
+	fmt.Println(":我撒大叔大叔大叔大的")
 	// 加载配置文件
 	var c config.Config
 	conf.MustLoad(*configFile, &c)

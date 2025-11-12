@@ -8,26 +8,38 @@ import (
 	_ "image/png"  // 支持PNG格式
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+// 常量定义
+const (
+	// JPG 转换质量（100 表示最高质量）
+	jpegConversionQuality = "100"
+
+	// 默认图片尺寸（4:3 比例，常见手机照片尺寸）
+	defaultImageWidth  = 4000
+	defaultImageHeight = 3000
+
+	// 宽高比容差
+	aspectRatioTolerance = 0.02
+)
+
 // AspectRatio 宽高比结构
 type AspectRatio struct {
-	Name      string
-	Ratio     float64
-	Tolerance float64
+	Name      string  // 比例名称，如 "16_9"
+	Ratio     float64 // 比例值，如 16.0/9.0
+	Tolerance float64 // 容差范围
 }
 
 // 预定义的标准宽高比（只保留常用比例）
 var standardAspectRatios = []AspectRatio{
-	{Name: "1_1", Ratio: 1.0, Tolerance: 0.02},
-	{Name: "4_3", Ratio: 4.0 / 3.0, Tolerance: 0.02},
-	{Name: "16_9", Ratio: 16.0 / 9.0, Tolerance: 0.02},
-	{Name: "3_2", Ratio: 3.0 / 2.0, Tolerance: 0.02},
+	{Name: "1_1", Ratio: 1.0, Tolerance: aspectRatioTolerance},
+	{Name: "4_3", Ratio: 4.0 / 3.0, Tolerance: aspectRatioTolerance},
+	{Name: "16_9", Ratio: 16.0 / 9.0, Tolerance: aspectRatioTolerance},
+	{Name: "3_2", Ratio: 3.0 / 2.0, Tolerance: aspectRatioTolerance},
 }
 
 // ImageAnalyzer 图片分析器
@@ -37,6 +49,10 @@ type ImageAnalyzer struct{}
 func NewImageAnalyzer() *ImageAnalyzer {
 	return &ImageAnalyzer{}
 }
+
+// ============================================================
+// 图片尺寸获取相关方法
+// ============================================================
 
 // GetImageDimensions 获取图片的宽高
 // 注意：在调用此方法前，应先调用 ConvertToJPG 将特殊格式转换为 JPG
@@ -93,30 +109,20 @@ func (ia *ImageAnalyzer) tryExifTool(imagePath string) (width, height int, err e
 	cmd := exec.Command("exiftool", "-ImageWidth", "-ImageHeight", "-s", "-s", "-s", imagePath)
 	output, err := cmd.Output()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("exiftool执行失败: %v", err)
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) != 2 {
-		return 0, 0, fmt.Errorf("exiftool输出格式不正确")
+		return 0, 0, fmt.Errorf("exiftool输出格式不正确，期望2行，实际%d行", len(lines))
 	}
 
-	width, err = strconv.Atoi(strings.TrimSpace(lines[0]))
-	if err != nil {
-		return 0, 0, fmt.Errorf("解析宽度失败: %v", err)
-	}
-
-	height, err = strconv.Atoi(strings.TrimSpace(lines[1]))
-	if err != nil {
-		return 0, 0, fmt.Errorf("解析高度失败: %v", err)
-	}
-
-	return width, height, nil
+	return ia.parseDimensions(lines[0], lines[1])
 }
 
-// tryImageMagick 尝试使用ImageMagick的identify命令获取图片尺寸
+// tryImageMagick 尝试使用ImageMagick的magick命令获取图片尺寸
 func (ia *ImageAnalyzer) tryImageMagick(imagePath string) (width, height int, err error) {
-	cmd := exec.Command("identify", "-format", "%w %h", imagePath)
+	cmd := exec.Command("magick", "identify", "-format", "%w %h", imagePath)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, err
@@ -124,7 +130,7 @@ func (ia *ImageAnalyzer) tryImageMagick(imagePath string) (width, height int, er
 
 	parts := strings.Fields(strings.TrimSpace(string(output)))
 	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("identify输出格式不正确")
+		return 0, 0, fmt.Errorf("magick identify输出格式不正确")
 	}
 
 	width, err = strconv.Atoi(parts[0])
@@ -142,23 +148,34 @@ func (ia *ImageAnalyzer) tryImageMagick(imagePath string) (width, height int, er
 
 // tryFFProbe 尝试使用ffprobe获取图片尺寸
 func (ia *ImageAnalyzer) tryFFProbe(imagePath string) (width, height int, err error) {
-	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "csv=p=0", "-select_streams", "v:0", "-show_entries", "stream=width,height", imagePath)
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-print_format", "csv=p=0",
+		"-select_streams", "v:0", "-show_entries", "stream=width,height", imagePath)
 	output, err := cmd.Output()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("ffprobe执行失败: %v", err)
 	}
 
 	parts := strings.Split(strings.TrimSpace(string(output)), ",")
 	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("ffprobe输出格式不正确")
+		return 0, 0, fmt.Errorf("ffprobe输出格式不正确，期望2个字段，实际%d个", len(parts))
 	}
 
-	width, err = strconv.Atoi(parts[0])
+	return ia.parseDimensions(parts[0], parts[1])
+}
+
+// getDefaultDimensions 返回默认的图片尺寸，并返回合理的宽高比
+func (ia *ImageAnalyzer) getDefaultDimensions() (width, height int) {
+	return defaultImageWidth, defaultImageHeight
+}
+
+// parseDimensions 解析宽高字符串为整数（通用辅助方法）
+func (ia *ImageAnalyzer) parseDimensions(widthStr, heightStr string) (width, height int, err error) {
+	width, err = strconv.Atoi(strings.TrimSpace(widthStr))
 	if err != nil {
 		return 0, 0, fmt.Errorf("解析宽度失败: %v", err)
 	}
 
-	height, err = strconv.Atoi(parts[1])
+	height, err = strconv.Atoi(strings.TrimSpace(heightStr))
 	if err != nil {
 		return 0, 0, fmt.Errorf("解析高度失败: %v", err)
 	}
@@ -166,11 +183,9 @@ func (ia *ImageAnalyzer) tryFFProbe(imagePath string) (width, height int, err er
 	return width, height, nil
 }
 
-// getDefaultDimensions 返回默认的图片尺寸，并返回合理的宽高比
-func (ia *ImageAnalyzer) getDefaultDimensions() (width, height int) {
-	// 返回常见的手机照片尺寸，4:3比例
-	return 4000, 3000
-}
+// ============================================================
+// 宽高比计算相关方法
+// ============================================================
 
 // CalculateAspectRatio 计算宽高比
 func (ia *ImageAnalyzer) CalculateAspectRatio(width, height int) float64 {
@@ -205,79 +220,144 @@ func abs(x float64) float64 {
 	return x
 }
 
-// ConvertToJPG 将特殊格式的图片转换为标准JPG格式
-// 支持的转换格式：heic, heif, webp, jfif
-// 如果文件已经是jpg格式，则不进行转换直接返回原路径
-// 如果需要转换，会生成一个新的jpg文件，并删除原文件，返回新文件路径
-func (ia *ImageAnalyzer) ConvertToJPG(imagePath string) (newPath string, converted bool, err error) {
-	fileExt := strings.ToLower(filepath.Ext(imagePath))
+// ============================================================
+// 图片格式转换相关方法
+// ============================================================
 
-	// 检查是否需要转换
-	needConvert := ia.needsConversion(fileExt)
-
-	if !needConvert {
-		// 不需要转换，直接返回原路径
-		return imagePath, false, nil
+// ConvertToJPG 将 .tmp 文件转换为 .jpg 格式
+// 流程：
+// 1. 使用 exiftool 检测真实格式
+// 2. 使用 ImageMagick 转换为 .jpg
+// 3. 删除 .tmp 文件
+// 4. 返回 .jpg 文件路径
+func (ia *ImageAnalyzer) ConvertToJPG(tmpPath string) (jpgPath string, err error) {
+	// 1. 检测真实格式
+	realFormat, err := ia.DetectImageFormat(tmpPath)
+	if err != nil {
+		logx.Infof("无法检测图片真实格式: %v，将继续尝试转换", err)
+		realFormat = "UNKNOWN"
 	}
 
-	// 生成新的jpg文件路径
-	newPath = strings.TrimSuffix(imagePath, fileExt) + ".jpg"
+	// 2. 生成 JPG 文件路径（去掉 .tmp 后缀，加上 .jpg）
+	jpgPath = strings.TrimSuffix(tmpPath, ".tmp") + ".jpg"
 
-	logx.Infof("检测到特殊格式 %s，开始转换为 JPG", fileExt)
-
-	// 使用 ImageMagick 的 convert 命令转换（支持所有格式）
-	err = ia.convertWithImageMagick(imagePath, newPath)
-	if err == nil {
-		// 转换成功，删除原文件
-		if removeErr := os.Remove(imagePath); removeErr != nil {
-			logx.Errorf("删除原文件失败: %s, 错误: %v", imagePath, removeErr)
-		}
-		logx.Infof("图片格式转换成功: %s -> JPG", fileExt)
-		return newPath, true, nil
+	// 3. 使用 ImageMagick 转换
+	logx.Infof("开始转换图片: %s -> JPG (检测到的格式: %s)", tmpPath, realFormat)
+	err = ia.convertWithImageMagick(tmpPath, jpgPath)
+	if err != nil {
+		return "", fmt.Errorf("ImageMagick转换失败: %v", err)
 	}
 
-	// ImageMagick 失败，记录错误但不中断流程
-	logx.Errorf("格式转换失败: %v，将使用原文件继续处理", err)
-	return imagePath, false, fmt.Errorf("ImageMagick转换失败: %v", err)
+	// 4. 删除 .tmp 文件
+	if removeErr := os.Remove(tmpPath); removeErr != nil {
+		logx.Errorf("删除临时文件失败: %s, 错误: %v", tmpPath, removeErr)
+		// 不影响主流程，继续执行
+	}
+
+	// 5. 对于某些格式（如 BMP），转换后可能缺少 EXIF 信息，需要补充
+	if shouldWriteExif(realFormat) {
+		logx.Infof("补充 EXIF 信息: %s (格式: %s)", jpgPath, realFormat)
+		ia.writeBasicExifInfo(jpgPath) // 不影响主流程，失败也继续
+	}
+
+	logx.Infof("图片转换成功: %s -> %s (格式: %s)", tmpPath, jpgPath, realFormat)
+	return jpgPath, nil
 }
 
-// needsConversion 判断文件扩展名是否需要转换为JPG
-func (ia *ImageAnalyzer) needsConversion(fileExt string) bool {
-	switch fileExt {
-	case ".heic", ".heif":
-		// Apple 的 HEIC/HEIF 格式
-		return true
-	case ".webp":
-		// Google 的 WebP 格式
-		return true
-	case ".jfif":
-		// JPEG 文件交换格式（JPEG File Interchange Format）
-		return true
-	case ".jpg", ".jpeg":
-		// 已经是标准 JPG 格式
-		return false
-	default:
-		// 其他格式保持不变（如 png, gif 等）
-		return false
+// DetectImageFormat 检测图片的真实格式（不依赖扩展名）
+// 使用 exiftool 命令检测，支持本地文件
+// 返回真实的文件格式（如 "HEIC", "JPEG", "PNG", "BMP", "WEBP" 等）
+func (ia *ImageAnalyzer) DetectImageFormat(imagePath string) (format string, err error) {
+	// 使用 exiftool -FileType 获取真实格式
+	// -s3: 只输出值，不输出字段名
+	// FileType 返回文件的真实类型，不受扩展名影响
+	cmd := exec.Command("exiftool", "-FileType", "-s3", imagePath)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("无法识别图片格式: %v", err)
 	}
+
+	format = strings.TrimSpace(strings.ToUpper(string(output)))
+	logx.Infof("检测到图片真实格式: %s (来源: %s)", format, imagePath)
+	return format, nil
 }
 
-// convertWithImageMagick 使用 ImageMagick 的 convert 命令转换图片
-// 支持的格式：heic, heif, webp, jfif, png, gif 等
-// 转换为 JPG 格式，质量设置为 100% (无损质量)
+// convertWithImageMagick 使用 ImageMagick 的 magick 命令转换图片
+// 支持的格式：heic, heif, webp, jfif, bmp, tiff 等
+// 转换为 JPG 格式，质量设置为 100%（尽量保留原图质量）
+// 转换时会移除原始 EXIF 数据，并设置新的时间戳
+// srcPath 可以是本地文件路径，也可以是网络 URL
 func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath string) error {
-	// convert 源文件 -quality 100 目标文件.jpg
-	// 使用 quality 100 来尽量保留原图质量，减少压缩损失
-	cmd := exec.Command("convert", srcPath, "-quality", "100", dstPath)
+	cmd := exec.Command("magick",
+		srcPath,
+		"-strip",                     // 移除所有原始 EXIF 数据
+		"-set", "date:create", "now", // 设置创建时间为当前时间
+		"-set", "date:modify", "now", // 设置修改时间为当前时间
+		"-quality", jpegConversionQuality, // 设置 JPEG 质量
+		dstPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("convert命令执行失败: %v, 输出: %s", err, string(output))
+		return fmt.Errorf("magick命令执行失败: %v, 输出: %s", err, string(output))
 	}
 
-	// 验证输出文件是否存在
-	if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+	// 验证输出文件是否存在且不为空
+	stat, err := os.Stat(dstPath)
+	if os.IsNotExist(err) {
 		return fmt.Errorf("转换后的文件不存在: %s", dstPath)
 	}
+	if err != nil {
+		return fmt.Errorf("验证转换结果失败: %v", err)
+	}
+	if stat.Size() == 0 {
+		return fmt.Errorf("转换后的文件为空: %s", dstPath)
+	}
 
+	return nil
+}
+
+// shouldWriteExif 判断该格式转换后是否需要补充 EXIF 信息
+func shouldWriteExif(format string) bool {
+	format = strings.ToUpper(format)
+	switch format {
+	case "BMP", "BMP3", "DIB":
+		// BMP 系列格式转换后通常缺少 EXIF 信息
+		return true
+	case "TIFF", "TIF":
+		// TIFF 格式有时也需要补充
+		return true
+	default:
+		// 其他格式通常不需要
+		return false
+	}
+}
+
+// writeBasicExifInfo 为转换后的图片写入基础 EXIF 信息
+// 解决某些格式（如 BMP3）转换后缺少 ImageWidth、ImageHeight 等基础信息的问题
+func (ia *ImageAnalyzer) writeBasicExifInfo(imagePath string) error {
+	// 1. 先获取图片的实际尺寸
+	width, height, err := ia.GetImageDimensions(imagePath)
+	if err != nil {
+		logx.Infof("无法获取图片尺寸，跳过写入 EXIF: %v", err)
+		return nil // 不返回错误，因为这不是关键操作
+	}
+
+	// 2. 使用 exiftool 写入基础 EXIF 信息
+	// -overwrite_original: 不创建备份文件
+	// -ImageWidth, -ImageHeight: 设置图片尺寸
+	// -Orientation=1: 设置正常方向
+	cmd := exec.Command("exiftool",
+		"-overwrite_original",
+		fmt.Sprintf("-ImageWidth=%d", width),
+		fmt.Sprintf("-ImageHeight=%d", height),
+		"-Orientation=1",
+		imagePath)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logx.Infof("写入 EXIF 信息失败: %v, 输出: %s", err, string(output))
+		return nil // 不返回错误，因为这不是关键操作
+	}
+
+	logx.Infof("成功写入基础 EXIF 信息: %s (尺寸: %dx%d)", imagePath, width, height)
 	return nil
 }
