@@ -173,6 +173,63 @@ func (fm *FileManager) EnsureOutputDirectory() error {
 	return nil
 }
 
+// CleanOldTempFiles 清理超过指定时间的临时文件
+// maxAge: 文件最大保留时间（小时）
+func (fm *FileManager) CleanOldTempFiles(maxAgeHours int) error {
+	tempDir := filepath.Join(fm.outputPath, ".temp")
+	
+	// 检查临时目录是否存在
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		logx.Infof("临时目录不存在，无需清理: %s", tempDir)
+		return nil
+	}
+
+	logx.Infof("开始清理超过 %d 小时的临时文件: %s", maxAgeHours, tempDir)
+	
+	now := time.Now()
+	maxAge := time.Duration(maxAgeHours) * time.Hour
+	cleanedCount := 0
+	cleanedSize := int64(0)
+
+	// 遍历临时目录
+	err := filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			logx.Errorf("访问文件失败: %s, 错误: %v", path, err)
+			return nil // 继续处理其他文件
+		}
+
+		// 跳过目录本身
+		if info.IsDir() {
+			return nil
+		}
+
+		// 检查文件年龄
+		age := now.Sub(info.ModTime())
+		if age > maxAge {
+			logx.Infof("清理临时文件: %s (年龄: %.1f小时, 大小: %.2fMB)",
+				path, age.Hours(), float64(info.Size())/(1024*1024))
+			
+			if removeErr := os.Remove(path); removeErr != nil {
+				logx.Errorf("删除临时文件失败: %s, 错误: %v", path, removeErr)
+			} else {
+				cleanedCount++
+				cleanedSize += info.Size()
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("遍历临时目录失败: %v", err)
+	}
+
+	logx.Infof("临时文件清理完成: 清理 %d 个文件, 释放 %.2fMB 空间",
+		cleanedCount, float64(cleanedSize)/(1024*1024))
+	
+	return nil
+}
+
 // CleanOrderFiles 清理指定订单的所有文件
 func (fm *FileManager) CleanOrderFiles(order *model.Order) error {
 	logx.Infof("开始清理订单 %s 的旧文件", order.OrderSn)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
@@ -45,12 +46,19 @@ func NewPhotoSyncer(db sqlx.SqlConn, syncConfig config.SyncConfig) *PhotoSyncer 
 
 // SyncPhotos 执行照片同步操作，获取一条status=0或status=-1的订单并下载照片
 func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
+	startTime := time.Now()
 	logx.Info("开始同步照片")
 
 	// 创建目录
 	if err := s.fileManager.EnsureOutputDirectory(); err != nil {
 		logx.Errorf("无法创建输出目录: %v", err)
 		return err
+	}
+
+	// 清理超过2小时的临时文件（防止磁盘空间被占满）
+	if err := s.fileManager.CleanOldTempFiles(2); err != nil {
+		logx.Errorf("清理临时文件失败: %v", err)
+		// 不中断主流程
 	}
 
 	// 获取一条待处理的订单(status=0或status=-1)并立即标记为处理中(status=1)
@@ -69,6 +77,7 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		return nil
 	}
 
+	orderStartTime := time.Now()
 	logx.Infof("开始处理订单，order_sn=%s, receiver=%s, retry=%d", order.OrderSn, order.Receiver, order.RetryCount)
 
 	// 清理订单之前的旧文件
@@ -85,8 +94,12 @@ func (s *PhotoSyncer) SyncPhotos(ctx context.Context) error {
 		logx.Errorf("更新订单最终状态失败, 订单ID: %d, 错误: %v", order.Id, err)
 	}
 
-	logx.Infof("订单处理完成: id=%d, sn=%s", order.Id, order.OrderSn)
-	logx.Info("照片同步完成")
+	orderDuration := time.Since(orderStartTime)
+	logx.Infof("订单处理完成: id=%d, sn=%s, 耗时=%.2f秒, 成功=%d, 失败=%d",
+		order.Id, order.OrderSn, orderDuration.Seconds(), successCount, failCount)
+
+	totalDuration := time.Since(startTime)
+	logx.Infof("照片同步完成，总耗时=%.2f秒", totalDuration.Seconds())
 	return nil
 }
 
@@ -170,6 +183,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 		// 根据num字段循环下载指定数量的文件
 		var lastErrMsg string
 		for copyIndex := 1; copyIndex <= int(downloadCount); copyIndex++ {
+			copyStartTime := time.Now() // 记录副本处理开始时间
 
 			// 准备临时文件路径（直接使用 .tmp 后缀）
 			tempFileName := fmt.Sprintf("temp_%d_%d.tmp", photo.Id, copyIndex)
@@ -184,15 +198,29 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 
 			// 1. 下载文件到 .tmp 文件
 			tmpPath := filepath.Join(tempDir, tempFileName)
+			// 使用 defer 确保临时文件被清理（如果后续出错）
+			var tempPath string // 保存最终的临时文件路径（可能是 .tmp 或转换后的文件）
+			defer func(path string) {
+				if path != "" {
+					if _, err := os.Stat(path); err == nil {
+						// 文件存在但未被移走，说明处理失败，需要清理
+						os.Remove(path)
+					}
+				}
+			}(tmpPath)
+
+			downloadStartTime := time.Now()
 			if err := s.downloader.DownloadPhoto(ctx, photo.OriginUrl, tmpPath); err != nil {
 				logx.Errorf("下载失败 url=%s, photoId=%d, copy=%d, err=%v", photo.OriginUrl, photo.Id, copyIndex, err)
 				lastErrMsg = err.Error()
 				photoFailCount++
 				continue
 			}
+			downloadDuration := time.Since(downloadStartTime)
 
-			// 2. 转换 .tmp 为 .jpg（会自动检测真实格式并转换）
-			jpgPath, err := s.imageAnalyzer.ConvertToJPG(tmpPath)
+			// 2. 转换 .tmp 为最终格式（会自动检测真实格式并转换或重命名）
+			convertStartTime := time.Now()
+			finalPath, err := s.imageAnalyzer.ConvertToJPG(tmpPath)
 			if err != nil {
 				logx.Errorf("格式检测/转换失败: url=%s, err=%v", photo.OriginUrl, err)
 				os.Remove(tmpPath)
@@ -200,17 +228,25 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				photoFailCount++
 				continue
 			}
+			convertDuration := time.Since(convertStartTime)
 
-			// 3. 验证 JPG 文件是否存在
-			if _, err := os.Stat(jpgPath); os.IsNotExist(err) {
-				logx.Errorf("JPG文件不存在: %s", jpgPath)
-				lastErrMsg = "JPG文件不存在"
+			// 3. 验证最终文件是否存在
+			fileInfo, err := os.Stat(finalPath)
+			if os.IsNotExist(err) {
+				logx.Errorf("转换后文件不存在: %s", finalPath)
+				lastErrMsg = "转换后文件不存在"
+				photoFailCount++
+				continue
+			}
+			if err != nil {
+				logx.Errorf("验证文件失败: %s, err=%v", finalPath, err)
+				lastErrMsg = err.Error()
 				photoFailCount++
 				continue
 			}
 
-			// 使用转换后的 JPG 文件路径
-			tempPath := jpgPath
+			// 使用转换后的文件路径
+			tempPath = finalPath
 
 			var finalDir string
 
@@ -271,7 +307,7 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 			}
 
 			// 确保文件名唯一性，避免同一目录下的重复文件名
-			finalPath := filepath.Join(finalDir, fileName)
+			finalPath = filepath.Join(finalDir, fileName)
 			uniqueKey := fmt.Sprintf("%s/%s", finalDir, fileName)
 			counter := 1
 			for usedFileNames[uniqueKey] {
@@ -295,8 +331,16 @@ func (s *PhotoSyncer) downloadAllPhotos(ctx context.Context, photos []*model.Pho
 				continue
 			}
 
-			// 成功打印一条精简日志：url + 总体进度 + 副本进度
-			logx.Infof("下载成功 url=%s, 进度=%d/%d, 副本=%d/%d", photo.OriginUrl, photoIndex, totalPhotos, copyIndex, downloadCount)
+			// 计算总耗时和各阶段耗时
+			copyDuration := time.Since(copyStartTime)
+
+			// 成功打印详细日志：url + 进度 + 性能指标
+			logx.Infof("下载成功 url=%s, 进度=%d/%d, 副本=%d/%d, 大小=%.2fMB, 总耗时=%.2fs (下载=%.2fs, 转换=%.2fs)",
+				photo.OriginUrl, photoIndex, totalPhotos, copyIndex, downloadCount,
+				float64(fileInfo.Size())/(1024*1024),
+				copyDuration.Seconds(),
+				downloadDuration.Seconds(),
+				convertDuration.Seconds())
 			photoSuccessCount++
 		}
 

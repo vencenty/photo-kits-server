@@ -62,16 +62,18 @@ func (ia *ImageAnalyzer) GetImageDimensions(imagePath string) (width, height int
 	if err != nil {
 		return 0, 0, fmt.Errorf("打开图片文件失败: %v", err)
 	}
-	defer file.Close()
 
-	img, format, err := image.DecodeConfig(file)
-	if err == nil {
+	// 立即解析并关闭文件，避免文件句柄泄漏
+	img, format, decodeErr := image.DecodeConfig(file)
+	file.Close() // 立即关闭文件句柄
+	
+	if decodeErr == nil {
 		logx.Infof("成功解析图片尺寸，格式: %s, 尺寸: %dx%d", format, img.Width, img.Height)
 		return img.Width, img.Height, nil
 	}
 
 	// 如果标准库解析失败，尝试使用外部工具（ImageMagick, exiftool, ffprobe）
-	logx.Errorf("Go标准库解析图片失败: %v，尝试使用外部工具", err)
+	logx.Errorf("Go标准库解析图片失败: %v，尝试使用外部工具", decodeErr)
 	width, height, err = ia.getDimensionsWithExternalTools(imagePath)
 	if err == nil {
 		logx.Infof("成功通过外部工具获取图片尺寸: %dx%d", width, height)
@@ -227,10 +229,10 @@ func abs(x float64) float64 {
 // ConvertToJPG 将 .tmp 文件转换为 .jpg 格式
 // 流程：
 // 1. 使用 exiftool 检测真实格式
-// 2. 使用 ImageMagick 转换为 .jpg
+// 2. 根据格式决定：HEIC/HEIF 保持原格式，其他转换为 JPG
 // 3. 删除 .tmp 文件
-// 4. 返回 .jpg 文件路径
-func (ia *ImageAnalyzer) ConvertToJPG(tmpPath string) (jpgPath string, err error) {
+// 4. 返回最终文件路径
+func (ia *ImageAnalyzer) ConvertToJPG(tmpPath string) (finalPath string, err error) {
 	// 1. 检测真实格式
 	realFormat, err := ia.DetectImageFormat(tmpPath)
 	if err != nil {
@@ -238,12 +240,29 @@ func (ia *ImageAnalyzer) ConvertToJPG(tmpPath string) (jpgPath string, err error
 		realFormat = "UNKNOWN"
 	}
 
-	// 2. 生成 JPG 文件路径（去掉 .tmp 后缀，加上 .jpg）
-	jpgPath = strings.TrimSuffix(tmpPath, ".tmp") + ".jpg"
+	// 2. 根据真实格式决定处理方式
+	upperFormat := strings.ToUpper(realFormat)
+	
+	// HEIC/HEIF 格式特殊处理：保持原格式，不转换
+	if upperFormat == "HEIC" || upperFormat == "HEIF" {
+		// 直接重命名为 .heic 文件
+		finalPath = strings.TrimSuffix(tmpPath, ".tmp") + ".heic"
+		logx.Infof("检测到 HEIC/HEIF 格式，保持原格式: %s -> %s", tmpPath, finalPath)
+		
+		// 直接重命名文件（不转换）
+		if err := os.Rename(tmpPath, finalPath); err != nil {
+			return "", fmt.Errorf("重命名 HEIC/HEIF 文件失败: %v", err)
+		}
+		
+		logx.Infof("HEIC/HEIF 文件处理成功: %s", finalPath)
+		return finalPath, nil
+	}
 
-	// 3. 使用 ImageMagick 转换
+	// 3. 其他格式：转换为 JPG
+	jpgPath := strings.TrimSuffix(tmpPath, ".tmp") + ".jpg"
 	logx.Infof("开始转换图片: %s -> JPG (检测到的格式: %s)", tmpPath, realFormat)
-	err = ia.convertWithImageMagick(tmpPath, jpgPath)
+	
+	err = ia.convertWithImageMagick(tmpPath, jpgPath, realFormat)
 	if err != nil {
 		return "", fmt.Errorf("ImageMagick转换失败: %v", err)
 	}
@@ -283,16 +302,19 @@ func (ia *ImageAnalyzer) DetectImageFormat(imagePath string) (format string, err
 }
 
 // convertWithImageMagick 使用 ImageMagick 的 magick 命令转换图片
-// 支持的格式：heic, heif, webp, jfif, bmp, tiff 等
+// 支持的格式：webp, jfif, bmp, tiff, png, gif 等
 // 转换为 JPG 格式，质量设置为 100%（尽量保留原图质量）
-// 转换时会移除原始 EXIF 数据，并设置新的时间戳
-// srcPath 可以是本地文件路径，也可以是网络 URL
-func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath string) error {
+// 转换时会根据 EXIF Orientation 自动旋转/翻转图片，保留其他 EXIF 信息
+// realFormat: 真实格式（用于日志记录）
+func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath, realFormat string) error {
+	logx.Infof("使用 ImageMagick 转换: %s -> %s (格式: %s)", srcPath, dstPath, realFormat)
+	
+	// -auto-orient: 根据 EXIF Orientation 标签物理旋转/翻转像素数据
+	// 执行后会自动将 Orientation 标签设为 1（正常），避免重复旋转
+	// 不使用 -strip，保留原始 EXIF 信息（拍摄时间、相机型号等）和色彩配置
 	cmd := exec.Command("magick",
 		srcPath,
-		"-strip",                     // 移除所有原始 EXIF 数据
-		"-set", "date:create", "now", // 设置创建时间为当前时间
-		"-set", "date:modify", "now", // 设置修改时间为当前时间
+		"-auto-orient",               // 根据 EXIF Orientation 物理旋转/翻转图片
 		"-quality", jpegConversionQuality, // 设置 JPEG 质量
 		dstPath)
 	output, err := cmd.CombinedOutput()
@@ -312,6 +334,7 @@ func (ia *ImageAnalyzer) convertWithImageMagick(srcPath, dstPath string) error {
 		return fmt.Errorf("转换后的文件为空: %s", dstPath)
 	}
 
+	logx.Infof("ImageMagick 转换成功: %s (大小: %.2fMB)", dstPath, float64(stat.Size())/(1024*1024))
 	return nil
 }
 
